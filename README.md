@@ -177,6 +177,10 @@ The daemon reads `WRAPPER_*` environment variables (forwarded via
 - `WRAPPER_APPLE_INIT=0` - skip Apple lib initialization at startup.
   Lets you bring up the HTTP server alone for `/health` smoke tests
   even on builds where you have not staged the Apple libraries yet.
+- `WRAPPER_USERNAME` + `WRAPPER_PASSWORD` - if both are set and the runtime
+  initialized, the daemon runs password sign-in at startup when not already
+  authenticated (same semantics as `POST /login`; 2FA still needs
+  `POST /login/2fa`). Treat these as secrets.
 
 ### CI build
 

@@ -28,8 +28,13 @@
 //   WRAPPER_RESTORE_SESSION  "0" skips on-disk session restore after init.
 //   WRAPPER_APPLE_ID      Optional label for GET /me apple_id after restore
 //                         (not sent to Apple).
+//   WRAPPER_USERNAME      With WRAPPER_PASSWORD, run password sign-in at
+//                         startup if not already authenticated (same as
+//                         POST /login username field — Apple ID email).
+//   WRAPPER_PASSWORD      App-specific password for WRAPPER_USERNAME auto-login.
 
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -114,7 +119,9 @@ bool consume_argv(int argc, char** argv) {
                 "  WRAPPER_DEVICE_INFO      9-tuple device identifier\n"
                 "  WRAPPER_APPLE_INIT       set to 0 to skip Apple lib init\n"
                 "  WRAPPER_RESTORE_SESSION  set to 0 to skip session restore\n"
-                "  WRAPPER_APPLE_ID         optional /me label after restore\n",
+                "  WRAPPER_APPLE_ID         optional /me label after restore\n"
+                "  WRAPPER_USERNAME         Apple ID for env auto-login (+WRAPPER_PASSWORD)\n"
+                "  WRAPPER_PASSWORD         app password for env auto-login\n",
                 kVersion, argv[0], kDefaultHost, kDefaultPort);
             return false;
         }
@@ -125,6 +132,52 @@ bool consume_argv(int argc, char** argv) {
         std::exit(2);
     }
     return true;
+}
+
+void maybe_auto_login_from_env(wrapper::apple::Account& account,
+                               const wrapper::apple::Loader& loader,
+                               const wrapper::apple::Runtime& runtime,
+                               bool apple_init_enabled) {
+    if (!apple_init_enabled || !runtime.initialized()) {
+        return;
+    }
+    std::string user = env_or("WRAPPER_USERNAME", "");
+    const char* pw   = std::getenv("WRAPPER_PASSWORD");
+    if (user.empty() || pw == nullptr || *pw == '\0') {
+        if ((pw != nullptr && *pw != '\0') && user.empty()) {
+            std::fprintf(stderr,
+                         "wrapper-v2: WRAPPER_PASSWORD is set but WRAPPER_USERNAME "
+                         "is missing; skipping env auto-login\n");
+        }
+        return;
+    }
+    if (account.state() == wrapper::apple::LoginState::Authenticated) {
+        return;
+    }
+    std::string password(pw);
+    if (!account.start_login(loader, runtime, std::move(user), std::move(password))) {
+        std::fprintf(stderr,
+                     "wrapper-v2: env auto-login could not start (state=%s)\n",
+                     wrapper::apple::to_string(account.state()));
+        return;
+    }
+    auto st = account.wait_for_settled_state(std::chrono::milliseconds(30000));
+    if (st == wrapper::apple::LoginState::Authenticated) {
+        std::fprintf(stderr, "wrapper-v2: env auto-login succeeded\n");
+    } else if (st == wrapper::apple::LoginState::Awaiting2FA) {
+        std::fprintf(stderr,
+                     "wrapper-v2: env auto-login needs 2FA; POST /login/2fa with "
+                     "{\"code\":\"...\"}\n");
+    } else if (st == wrapper::apple::LoginState::Failed) {
+        auto snap = account.public_snapshot();
+        std::fprintf(stderr, "wrapper-v2: env auto-login failed: %s (code %d)\n",
+                     snap.last_error.c_str(), snap.last_error_code);
+    } else {
+        std::fprintf(stderr,
+                     "wrapper-v2: env auto-login still in progress or timed out "
+                     "(state=%s)\n",
+                     wrapper::apple::to_string(st));
+    }
 }
 
 }  // namespace
@@ -195,6 +248,8 @@ int main(int argc, char** argv) {
                      "wrapper-v2: WRAPPER_APPLE_INIT=0, skipping Apple lib init "
                      "(stub mode: /health only; POST /login returns 503)\n");
     }
+
+    maybe_auto_login_from_env(account, loader, runtime, info.apple_init_enabled);
 
     httplib::Server svr;
     g_server.store(&svr);
