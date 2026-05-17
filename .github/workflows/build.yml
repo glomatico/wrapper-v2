@@ -2,20 +2,22 @@ name: build
 
 on:
   push:
-    branches: [main]
+    branches: [main, phase-1]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: build (${{ matrix.arch }})
     runs-on: ubuntu-latest
-    # Skip PRs from forks - they have no access to the APK_URL secret and
-    # cannot pass the SHA-256 verification step. Maintainers running
-    # workflow_dispatch or pushes to main always proceed.
+    # Fork PRs cannot use repository secrets (APK_URL).
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -37,32 +39,35 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             jq unzip curl ca-certificates
 
-      - name: Sanity check secret
+      - name: Make scripts executable
+        run: chmod +x tools/fetch-apk.sh tools/extract-libs.sh tools/stage-system.sh
+
+      - name: Sanity check APK_URL secret
         run: |
           if [[ -z "${APK_URL}" ]]; then
             echo "::error::APK_URL secret is not set."
-            echo "Maintainers: set APK_URL to point at the pinned APKMirror .apkm bundle."
+            echo "Maintainers: set APK_URL to a URL for the pinned .apkm (hash in LIBS_VERSION.json → apkm)."
             exit 1
           fi
 
-      - name: Fetch APKM bundle
+      - name: Download and verify .apkm
         run: |
           mkdir -p .tmp
-          tools/fetch-apk.sh \
-            --url    "${APK_URL}" \
+          ./tools/fetch-apk.sh \
+            --url "${APK_URL}" \
             --expect apkm \
-            --out    .tmp/bundle.apkm
+            --out .tmp/bundle.apkm
 
-      - name: Extract Apple libs
+      - name: Extract Apple native libs
         run: |
-          tools/extract-libs.sh \
+          ./tools/extract-libs.sh \
             --bundle .tmp/bundle.apkm \
-            --arch   ${{ matrix.arch }} \
-            --out    rootfs/system/lib64
+            --arch ${{ matrix.arch }} \
+            --out rootfs/system/lib64
 
       - name: Stage Android system binaries
         run: |
-          tools/stage-system.sh --arch ${{ matrix.arch }}
+          ./tools/stage-system.sh --arch ${{ matrix.arch }}
 
       - name: Build Docker image
         run: |
@@ -78,8 +83,11 @@ jobs:
             --cap-add SYS_ADMIN --cap-add SYS_CHROOT \
             -p 8080:80 \
             wrapper-v2:${{ github.sha }}
-          for i in $(seq 1 20); do
-            if curl -sf http://127.0.0.1:8080/health >/dev/null; then break; fi
+          for i in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:8080/health >/dev/null; then
+              echo "health OK after ${i} attempt(s)"
+              break
+            fi
             sleep 0.5
           done
           curl -sf http://127.0.0.1:8080/health | jq .

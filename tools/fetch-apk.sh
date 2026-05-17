@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-# fetch-apk.sh - Download an APK split or .apkm bundle and verify its SHA-256
-# against LIBS_VERSION.json.
+# fetch-apk.sh - Download a pinned artifact and verify its SHA-256 against
+# LIBS_VERSION.json.
 #
 # Usage:
-#   APK_URL=https://example.com/foo.apk \
-#     tools/fetch-apk.sh --expect base.apk --out .tmp/apk/base.apk
+#   APK_URL=https://example.com/bundle.apkm \
+#     tools/fetch-apk.sh --expect apkm --out .tmp/bundle.apkm
 #
-#   tools/fetch-apk.sh --url https://... --expect split_config.x86_64.apk \
-#                       --out .tmp/apk/split_config.x86_64.apk
-#
-# The --expect value is looked up in LIBS_VERSION.json under .splits.
+# The --expect value must be a top-level string key in LIBS_VERSION.json (e.g. apkm).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,16 +30,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$URL" ]];    then echo "fetch-apk: missing --url or APK_URL"   >&2; exit 2; fi
-if [[ -z "$EXPECT" ]]; then echo "fetch-apk: missing --expect <split>"  >&2; exit 2; fi
+if [[ -z "$EXPECT" ]]; then echo "fetch-apk: missing --expect <libs_version_key>" >&2; exit 2; fi
 if [[ -z "$OUT" ]];    then echo "fetch-apk: missing --out <path>"      >&2; exit 2; fi
 
 if ! command -v jq        >/dev/null; then echo "fetch-apk: jq is required"        >&2; exit 3; fi
 if ! command -v sha256sum >/dev/null; then echo "fetch-apk: sha256sum is required" >&2; exit 3; fi
 
-EXPECT_HASH="$(jq -r --arg k "$EXPECT" '.splits[$k] // .[$k] // empty' "$LIBS_VERSION" | tr -d '\r')"
+EXPECT_HASH="$(jq -r --arg k "$EXPECT" 'if (.[$k] | type) == "string" then .[$k] else empty end' "$LIBS_VERSION" | tr -d '\r')"
 if [[ -z "$EXPECT_HASH" ]]; then
-    echo "fetch-apk: no SHA-256 pin for '$EXPECT' in LIBS_VERSION.json" >&2
-    echo "  (looked under .splits.<key> and at top-level .<key>)" >&2
+    echo "fetch-apk: no string SHA-256 pin for top-level '$EXPECT' in LIBS_VERSION.json" >&2
     exit 4
 fi
 

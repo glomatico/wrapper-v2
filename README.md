@@ -107,8 +107,8 @@ APK_URL=https://your-mirror.example/apple-music-3.6.0-beta-1109.apkm \
     tools/fetch-apk.sh --expect apkm \
                         --out    .tmp/bundle.apkm
 
-# 2. Extract Apple libs into rootfs/, verifying SHA-256 at every step
-#    (bundle, inner split, every individual .so).
+# 2. Extract Apple libs into rootfs/. The .apkm must match LIBS_VERSION.json
+#    .apkm; each extracted .so matches .libs.x86_64.
 tools/extract-libs.sh --bundle .tmp/bundle.apkm \
                        --arch   x86_64 \
                        --out    rootfs/system/lib64
@@ -154,16 +154,14 @@ The daemon reads `WRAPPER_*` environment variables (forwarded via
   Lets you bring up the HTTP server alone for `/health` smoke tests
   even on builds where you have not staged the Apple libraries yet.
 
-If you already have a single `split_config.x86_64.apk` rather than an
-`.apkm` bundle, swap step 2 for `tools/extract-libs.sh --apk path/to/split_config.x86_64.apk ...` -
-the same SHA verification still applies.
-
 ### CI build
 
-The `.github/workflows/build.yml` workflow does the same three steps using
-a single repository secret:
+The `.github/workflows/build.yml` workflow runs on **push** to `main` or `phase-1`,
+on **pull_request** (same-repo only for the full job), and **workflow_dispatch**.
+It uses the same host steps as above plus a Docker build and `/health` smoke test,
+with one repository secret:
 
-- `APK_URL` - URL of the pinned `.apkm` bundle (contains every split)
+- `APK_URL` - URL of the pinned `.apkm` (must match `LIBS_VERSION.json` → `apkm`)
 
 Pull requests opened from forks skip the build job (they cannot read the
 secret).

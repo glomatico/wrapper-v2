@@ -1,5 +1,5 @@
 {
-  "$comment": "Pinned APK and native library hashes. Do not edit by hand without verifying. The CI build fetches an APK from $APK_URL and refuses to proceed unless the SHA-256 of every artifact below matches.",
+  "$comment": "Pinned APK bundle and native library hashes. CI fetches a .apkm from $APK_URL; its SHA-256 must match .apkm. Extracted Apple .so files match .libs; AOSP vendored paths match .android_system.",
   "apk": {
     "package": "com.apple.android.music",
     "version": "3.6.0-beta",
@@ -7,11 +7,6 @@
     "ndk_version": "r23b"
   },
   "apkm": "5be907af370a7f6bd73344e646dcfebe2e64c2da3b9ad71192110c91950f3f67",
-  "splits": {
-    "base.apk": "dccd0a409d0182a6fb5703dab1c50e2d864df99a689f9565304427f53a9f210b",
-    "split_config.x86_64.apk": "20c20eab8e70726669677d55c194f96977922bc14a3f7200a8d24712da311798",
-    "split_config.arm64_v8a.apk": "c1d5ec58832b98446bef4c906ff81bce3287a425ef75bc576cad9b2ad8890045"
-  },
   "android_system": {
     "$comment": "Android system libraries needed at runtime by Apple's .so files. Committed to the repo under vendor/android-system/<arch>/. Apache-2.0 (AOSP). See vendor/android-system/README.md for provenance.",
     "x86_64": {
