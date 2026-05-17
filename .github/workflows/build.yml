@@ -88,18 +88,29 @@ jobs:
 
       - name: Smoke test (/health)
         run: |
-          docker run --rm -d \
+          # No --rm: if the app exits immediately, Docker removes --rm containers
+          # and a later docker stop hits "No such container".
+          docker rm -f wrapper-smoke 2>/dev/null || true
+          docker run -d \
             --platform ${{ matrix.docker_platform }} \
             --name wrapper-smoke \
             --cap-add SYS_ADMIN --cap-add SYS_CHROOT \
             -p 8080:80 \
             wrapper-v2:${{ github.sha }}
+          ok=0
           for i in $(seq 1 40); do
             if curl -sf http://127.0.0.1:8080/health >/dev/null; then
               echo "health OK after ${i} attempt(s)"
+              ok=1
               break
             fi
             sleep 0.5
           done
+          if [[ "$ok" != "1" ]]; then
+            echo "::error::health did not become ready in time"
+            docker logs wrapper-smoke 2>&1 || true
+            docker rm -f wrapper-smoke 2>/dev/null || true
+            exit 1
+          fi
           curl -sf http://127.0.0.1:8080/health | jq .
-          docker stop wrapper-smoke
+          docker rm -f wrapper-smoke
