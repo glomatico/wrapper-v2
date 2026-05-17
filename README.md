@@ -1,10 +1,9 @@
 # wrapper-v2
 
 A clean rewrite of the Apple Music FairPlay decryption wrapper. Currently in
-**Phase 1.1** - the daemon initializes Apple's native libraries at startup,
-runs **Apple ID + password** sign-in via `AuthenticateFlow` (same family of
-calls as upstream `main.c`), and exposes harvested tokens over HTTP. M3U8 and
-decrypt endpoints are coming in later Phase 1 slices.
+**Phase 1.3** — same as 1.1, plus **`POST /decrypt`** for FairPlay sample
+decryption over JSON (batch base64 in/out). The **`/m3u8`** asset-URL helper is
+still planned (Phase 1.2).
 
 ## What it is
 
@@ -26,7 +25,7 @@ the build fails loudly.
 | 1.0 | Apple lib runtime init, dlopen loader, vendored AOSP closure | **Done** |
 | 1.1 | `POST /login`, `POST /login/2fa`, token harvest, `/me`, startup session restore (warm `WRAPPER_BASE_DIR`) | **Done** |
 | 1.2 | `/m3u8` (asset URL fetch) | Pending |
-| 1.3 | `/decrypt` (full MP4 round-trip, batch sample decrypt) | Pending |
+| 1.3 | `POST /decrypt` (FairPlay FPS sample decrypt, JSON base64 batch) | **Done** |
 | 2 | Rate limit, dedupe, request queue | Pending |
 | 3 | arm64-v8a build, multi-arch Docker | Pending |
 
@@ -36,10 +35,11 @@ Every endpoint accepts and returns `application/json`.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/health` | Liveness probe. `{status, phase, version, runtime}`. |
-| `GET` | `/me` | `{version, runtime, auth}` — runtime flags plus login state; when **authenticated** (after login or startup session restore from disk), `auth` includes `dev_token`, `music_user_token`, `storefront`, `dsid`, and timestamps. iTunes account token / `X-Token` are not returned. |
+| `GET` | `/health` | Liveness probe. `{status, phase, version, runtime}` — `runtime.playback_ready` is true when FairPlay decrypt is available. |
+| `GET` | `/me` | `{version, runtime, auth}` — same runtime flags as `/health`. |
 | `POST` | `/login` | Body: `{"username": "...", "password": "..."}` or `{"apple_id": "...", "password": "..."}` (synonyms). Drives Apple's `AuthenticateFlow`. Returns `200` + token snapshot, `202` if **2FA** is required (then `POST /login/2fa`), or `401` on failure. |
 | `POST` | `/login/2fa` | Body: `{"code": "123456"}`. Continues a login waiting for HSA2. |
+| `POST` | `/decrypt` | Body: `{"adam_id":"<store adam id>","uri":"<skd://...>","samples":["<base64>",...]}` or a single `"sample":"..."`. Returns `200` `{"samples":["<base64 plaintext>",...]}`. Needs **authenticated** session and `playback_ready`; otherwise `401` / `503`. Apple errors → `502`. |
 | `DELETE` | `/login` | Aborts an in-flight login or clears cached tokens from memory. Apple's on-disk `mpl_db` cache is unchanged. |
 
 Sign-in matches the legacy wrapper model: you send **email (Apple ID) and password**

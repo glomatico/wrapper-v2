@@ -17,12 +17,8 @@
 // and update LIBS_VERSION.json.
 //
 // Phase 1.0 brought runtime init online (DNS, DeviceGUID, RequestContext,
-// FootHillConfig). Phase 1.1 adds:
-//   - AuthenticateFlow + CredentialsResponse + AndroidPresentationInterface
-//     (real Apple-ID/password login)
-//   - URLRequest + URLResponse + HTTPMessage + Data
-//     (signed HTTPS for dev-token and music-user-token harvest)
-//   - StoreErrorCondition (error reporting)
+// FootHillConfig). Phase 1.1 adds AuthenticateFlow + URLRequest token harvest.
+// Phase 1.3 adds SVPlaybackLeaseManager + FairPlay sample decrypt symbols.
 
 #pragma once
 
@@ -315,6 +311,55 @@ using fn_URLResponse_underlyingResponse = shared_ptr* (*)(void* this_);
 using fn_RequestContext_storeFrontIdentifier =
     void (*)(std_string* out, void* this_, shared_ptr* url_bag);
 
+// ---------------------------------------------------------------------------
+// Phase 1.3 - SVPlaybackLeaseManager + SVFootHillSessionCtrl (FairPlay decrypt)
+// ---------------------------------------------------------------------------
+
+// SVPlaybackLeaseManager::SVPlaybackLeaseManager(
+//   std::function<void(int const&)> const&,
+//   std::function<void(std::shared_ptr<storeservicescore::StoreErrorCondition>
+//   const&)> const&)  [upstream main.cpp uses std::function<void(void*)> for 2nd]
+using fn_SVPlaybackLeaseManager_ctor = void (*)(
+    void* this_,
+    void* end_lease_std_function,
+    void* pb_err_std_function);
+
+using fn_SVPlaybackLeaseManager_refreshLeaseAutomatically = void (*)(void* this_,
+                                                                      std::uint8_t* flag);
+using fn_SVPlaybackLeaseManager_requestLease               = void (*)(void* this_,
+                                                      std::uint8_t* flag);
+
+using fn_SVFootHillSessionCtrl_instance = void* (*)();
+
+using fn_SVFootHillSessionCtrl_getPersistentKey =
+    void (*)(shared_ptr* ret,
+             void*       fh,
+             std_string* adam_id,
+             std_string* key_uri,
+             std_string* key_format,
+             std_string* key_format_ver,
+             std_string* server_uri,
+             std_string* protocol_type,
+             std_string* fps_cert);
+
+// Third argument is the persistent-key handle (upstream passes persistK.obj).
+using fn_SVFootHillSessionCtrl_decryptContext = void (*)(shared_ptr* ret,
+                                                         void*       fh,
+                                                         void* persistent_key_obj);
+
+// Returns pointer to kdContext; upstream dereferences once.
+using fn_SVFootHillPContext_kdContext = void** (*)(void* pctx);
+
+using fn_fp_sample_decrypt = long (*)(void*       kd_context,
+                                      std::uint32_t op,
+                                      void*       in_out,
+                                      void*       out_alias,
+                                      std::size_t size);
+
+using fn_SVFootHillSessionCtrl_resetAllContexts = void (*)(void* fh);
+
+using fn_shared_ptr_SVFootHillPContext_dtor = void (*)(shared_ptr* this_);
+
 // Mangled symbol names. These are the *strings* we feed to dlsym.
 // Kept centrally so that the Loader implementation does not embed
 // them inline (easier to audit and regenerate from `nm` output).
@@ -469,6 +514,38 @@ inline constexpr const char* URLResponse_underlyingResponse =
 
 inline constexpr const char* RequestContext_storeFrontIdentifier =
     "_ZNK17storeservicescore14RequestContext20storeFrontIdentifierERKNSt6__ndk110shared_ptrINS_6URLBagEEE";
+
+// ---- Phase 1.3: FairPlay decrypt / lease ----
+
+inline constexpr const char* SVPlaybackLeaseManager_ctor =
+    "_ZN22SVPlaybackLeaseManagerC2ERKNSt6__ndk18functionIFvRKiEEERKNS1_IFvRKNS0_10shared_ptrIN17storeservicescore19StoreErrorConditionEEEEEE";
+
+inline constexpr const char* SVPlaybackLeaseManager_refreshLeaseAutomatically =
+    "_ZN22SVPlaybackLeaseManager25refreshLeaseAutomaticallyERKb";
+
+inline constexpr const char* SVPlaybackLeaseManager_requestLease =
+    "_ZN22SVPlaybackLeaseManager12requestLeaseERKb";
+
+inline constexpr const char* SVFootHillSessionCtrl_instance =
+    "_ZN21SVFootHillSessionCtrl8instanceEv";
+
+// Must match `readelf --dyn-syms -W libandroidappmusic.so` exactly (dlsym is literal).
+inline constexpr const char* SVFootHillSessionCtrl_getPersistentKey =
+    "_ZN21SVFootHillSessionCtrl16getPersistentKeyERKNSt6__ndk112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEES8_S8_S8_S8_S8_S8_";
+
+inline constexpr const char* SVFootHillSessionCtrl_decryptContext =
+    "_ZN21SVFootHillSessionCtrl14decryptContextERKNSt6__ndk112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEERKN11SVDecryptor15SVDecryptorTypeERKb";
+
+inline constexpr const char* SVFootHillPContext_kdContext =
+    "_ZNK18SVFootHillPContext9kdContextEv";
+
+inline constexpr const char* fp_sample_decrypt = "NfcRKVnxuKZy04KWbdFu71Ou";
+
+inline constexpr const char* SVFootHillSessionCtrl_resetAllContexts =
+    "_ZN21SVFootHillSessionCtrl16resetAllContextsEv";
+
+inline constexpr const char* shared_ptr_SVFootHillPContext_dtor =
+    "_ZNSt6__ndk110shared_ptrI18SVFootHillPContextED2Ev";
 
 }  // namespace mangled
 

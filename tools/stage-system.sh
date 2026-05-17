@@ -46,8 +46,6 @@ mapfile -t EXPECTED < <(
 )
 [[ ${#EXPECTED[@]} -gt 0 ]] || { echo "stage-system: no .android_system.$ARCH section in LIBS_VERSION.json" >&2; exit 4; }
 
-mkdir -p "$ROOTFS/system/bin" "$ROOTFS/system/lib64"
-
 ok=0
 fail=0
 for rel in "${EXPECTED[@]}"; do
@@ -71,7 +69,9 @@ for rel in "${EXPECTED[@]}"; do
         lib64/*) mode=0644 ;;
         *)       mode=0644 ;;
     esac
-    install -m "$mode" "$src" "$ROOTFS/system/$rel"
+    dest="$ROOTFS/system/$rel"
+    mkdir -p "$(dirname "$dest")"
+    install -m "$mode" "$src" "$dest"
     ok=$((ok+1))
 done
 

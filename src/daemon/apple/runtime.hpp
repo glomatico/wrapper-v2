@@ -1,18 +1,18 @@
 // Apple Music native runtime initialization.
 //
 // `Runtime::initialize()` runs the equivalent of upstream main.c's
-// `init()` and `init_ctx()` in one go. After it returns true, the
-// process holds a configured `RequestContext` shared_ptr that
-// downstream Apple-API calls (storefront lookup, m3u8, decrypt) need.
+// `init()` and `init_ctx()` in one go, then wires SVPlaybackLeaseManager
+// + `SVFootHillSessionCtrl::instance()` for FairPlay decrypt. After it
+// returns true, the process holds a configured `RequestContext` shared_ptr
+// that downstream Apple-API calls (storefront lookup, m3u8, decrypt) need.
 //
-// Phase 1.0 calls this from main() only. Phase 1.1+ will use the
-// stored RequestContext for actual API calls. The runtime is
-// process-wide and single-instance: Apple's libs use process-global
+// The runtime is process-wide and single-instance: Apple's libs use process-global
 // state and are not safe to re-initialize.
 
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -71,6 +71,13 @@ public:
     // pointer through Apple's callback ABI.
     const Loader* loader() const { return loader_; }
 
+    // FairPlay sample decrypt (POST /decrypt). Requires successful
+    // SVPlaybackLeaseManager + SVFootHillSessionCtrl init at startup.
+    bool playback_ready() const { return playback_ready_; }
+    void* foothill_session() const { return foothill_; }
+    std::mutex& playback_mutex() { return playback_mutex_; }
+    void refresh_playback_lease();
+
 private:
     Runtime() = default;
     Runtime(const Runtime&) = delete;
@@ -82,6 +89,7 @@ private:
                               const RuntimeConfig& cfg,
                               const std::vector<std::string>& parts);
     bool init_presentation_interface(const Symbols& s);
+    bool init_playback_session(const Symbols& s);
 
     mutable std::mutex mu_;
     std::atomic<bool> initialized_{false};
@@ -91,6 +99,11 @@ private:
     abi::shared_ptr presentation_interface_{};
     std::string base_dir_;
     std::string device_info_;
+
+    std::mutex         playback_mutex_;
+    alignas(16) unsigned char lease_mgr_[16]{};
+    void*    foothill_         = nullptr;
+    bool     playback_ready_  = false;
 };
 
 }  // namespace wrapper::apple

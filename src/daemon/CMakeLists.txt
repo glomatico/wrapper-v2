@@ -41,6 +41,7 @@ add_executable(main
     main.cpp
     server.cpp
     apple/auth.cpp
+    apple/decrypt.cpp
     apple/loader.cpp
     apple/runtime.cpp
     apple/tokens.cpp

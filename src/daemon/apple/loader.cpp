@@ -1,6 +1,7 @@
 #include "apple/loader.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <dlfcn.h>
 
 namespace wrapper::apple {
@@ -9,11 +10,6 @@ namespace {
 
 // Helper: dlopen with friendlier error reporting.
 void* open_lib(const std::string& path, std::string* err_out) {
-    // RTLD_NOW: resolve every symbol up front so we fail fast at
-    //   dlopen() time rather than at first call.
-    // RTLD_GLOBAL: make symbols available for subsequent dlopens
-    //   (the storeservicescore.so chain expects mediaplatform's
-    //   exports to be visible during its own load).
     void* h = dlopen(path.c_str(), RTLD_NOW | RTLD_GLOBAL);
     if (h == nullptr) {
         const char* msg = dlerror();
@@ -25,12 +21,22 @@ void* open_lib(const std::string& path, std::string* err_out) {
     return h;
 }
 
+void* open_lib_optional(const std::string& path) {
+    void* h = dlopen(path.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    if (h == nullptr) {
+        const char* msg = dlerror();
+        std::fprintf(stderr, "loader: optional dlopen %s: %s\n", path.c_str(),
+                     msg ? msg : "?");
+    }
+    return h;
+}
+
 // Helper: dlsym with friendlier error reporting. Handle may be a real
 // dlopen result OR RTLD_DEFAULT (which on bionic/x86_64 is the literal
 // value 0 - so a null-check on the handle here would be wrong).
 template <typename T>
 bool resolve(void* h, const char* name, T* out, std::string* err_out) {
-    dlerror();  // clear
+    dlerror();
     void* sym = dlsym(h, name);
     const char* msg = dlerror();
     if (msg != nullptr || sym == nullptr) {
@@ -44,11 +50,6 @@ bool resolve(void* h, const char* name, T* out, std::string* err_out) {
     return true;
 }
 
-// Vtable symbols are data objects rather than function pointers, so
-// `resolve<>` (which casts to a function pointer) is the wrong shape.
-// We reuse dlsym's RTLD_DEFAULT lookup and cast to void** so callers
-// can do the upstream-style "skip the type_info + dtor slots" pointer
-// arithmetic.
 bool resolve_vtable(const char* name, void*** out, std::string* err_out) {
     dlerror();
     void* sym = dlsym(RTLD_DEFAULT, name);
@@ -64,52 +65,72 @@ bool resolve_vtable(const char* name, void*** out, std::string* err_out) {
     return true;
 }
 
+void clear_fairplay_symbols(Symbols* s) {
+    s->SVPlaybackLeaseManager_ctor                      = nullptr;
+    s->SVPlaybackLeaseManager_refreshLeaseAutomatically = nullptr;
+    s->SVPlaybackLeaseManager_requestLease              = nullptr;
+    s->SVFootHillSessionCtrl_instance                   = nullptr;
+    s->SVFootHillSessionCtrl_getPersistentKey           = nullptr;
+    s->SVFootHillSessionCtrl_decryptContext             = nullptr;
+    s->SVFootHillPContext_kdContext                     = nullptr;
+    s->fp_sample_decrypt                                = nullptr;
+    s->SVFootHillSessionCtrl_resetAllContexts           = nullptr;
+    s->shared_ptr_SVFootHillPContext_dtor               = nullptr;
+}
+
 }  // namespace
 
 bool Loader::open(const std::string& libs_dir) {
     if (ok_) return true;
 
-    // Load order matters: libc++_shared.so first (Apple's C++ runtime),
-    // then mediaplatform, then storeservicescore. The androidappmusic
-    // lib is dlopen'd last but is not strictly required to resolve
-    // symbols for Phase 1.0 (kept for parity with the upstream link
-    // line).
-    //
-    // We use absolute paths so dlopen doesn't have to consult
-    // LD_LIBRARY_PATH or rpath; the Android linker still uses /system/lib64
-    // search rules for the DT_NEEDED entries of these libs themselves.
     auto load = [&](const std::string& path, void** dest) {
         *dest = open_lib(path, &last_error_);
         return *dest != nullptr;
     };
 
-    // libc++_shared.so is already loaded as a DT_NEEDED entry of the
-    // daemon ELF itself (we link against the same SONAME at build
-    // time), so we do not dlopen it here.
-    if (!load(libs_dir + "/libmediaplatform.so",     &h_libmediaplatform_))     return false;
-    if (!load(libs_dir + "/libstoreservicescore.so", &h_libstoreservicescore_)) return false;
-    if (!load(libs_dir + "/libandroidappmusic.so",   &h_libandroidappmusic_))   return false;
+    // libc++_shared.so is already a DT_NEEDED of the daemon; do not dlopen.
+    //
+    // Pre-load FairPlay helpers first so SVFootHill symbols resolve (some
+    // builds only export the chain once CoreFP/CoreLSKD are in the process).
+    h_libcorefp_   = open_lib_optional(libs_dir + "/libCoreFP.so");
+    h_libcorelskd_ = open_lib_optional(libs_dir + "/libCoreLSKD.so");
 
-    // Apple's symbols are distributed across libstoreservicescore.so,
-    // libmediaplatform.so, and libandroidappmusic.so. Rather than
-    // hand-mapping each symbol to a handle, we resolve via RTLD_DEFAULT
-    // which searches every RTLD_GLOBAL-loaded lib plus the executable.
-    // The bionic resolver (_resolv_*) lives in libc.so and is reachable
-    // the same way.
+    // Match upstream CMake link order: androidappmusic, storeservicescore,
+    // mediaplatform (after cxx). Dependencies still resolve transitively.
+    if (!load(libs_dir + "/libandroidappmusic.so",   &h_libandroidappmusic_)) {
+        return false;
+    }
+    if (!load(libs_dir + "/libstoreservicescore.so", &h_libstoreservicescore_)) {
+        return false;
+    }
+    if (!load(libs_dir + "/libmediaplatform.so",     &h_libmediaplatform_)) {
+        return false;
+    }
+
     using namespace abi;
 
     if (!resolve(RTLD_DEFAULT,
                  mangled::resolv_set_nameservers_for_net,
-                 &symbols_.resolv_set_nameservers_for_net, &last_error_)) return false;
+                 &symbols_.resolv_set_nameservers_for_net, &last_error_)) {
+        return false;
+    }
 
     if (!resolve_vtable(mangled::vtable_RequestContextConfig,
-                        &symbols_.vtable_RequestContextConfig, &last_error_)) return false;
+                        &symbols_.vtable_RequestContextConfig, &last_error_)) {
+        return false;
+    }
     if (!resolve_vtable(mangled::vtable_CredentialsResponse,
-                        &symbols_.vtable_CredentialsResponse, &last_error_)) return false;
+                        &symbols_.vtable_CredentialsResponse, &last_error_)) {
+        return false;
+    }
     if (!resolve_vtable(mangled::vtable_ProtocolDialogResponse,
-                        &symbols_.vtable_ProtocolDialogResponse, &last_error_)) return false;
+                        &symbols_.vtable_ProtocolDialogResponse, &last_error_)) {
+        return false;
+    }
     if (!resolve_vtable(mangled::vtable_HTTPMessage,
-                        &symbols_.vtable_HTTPMessage, &last_error_)) return false;
+                        &symbols_.vtable_HTTPMessage, &last_error_)) {
+        return false;
+    }
 
 #define RESOLVE(field, name) \
     if (!resolve(RTLD_DEFAULT, mangled::name, &symbols_.field, &last_error_)) return false
@@ -134,7 +155,6 @@ bool Loader::open(const std::string& libs_dir) {
     RESOLVE(RequestContext_init,                     RequestContext_init);
     RESOLVE(RequestContext_setFairPlayDirectoryPath, RequestContext_setFairPlayDirectoryPath);
 
-    // ---- Phase 1.1: AndroidPresentationInterface + auth flow ----
     RESOLVE(make_shared_AndroidPresentationInterface, make_shared_AndroidPresentationInterface);
     RESOLVE(API_setCredentialsHandler,                API_setCredentialsHandler);
     RESOLVE(API_setDialogHandler,                     API_setDialogHandler);
@@ -169,7 +189,6 @@ bool Loader::open(const std::string& libs_dir) {
     RESOLVE(SEC_errorCode, SEC_errorCode);
     RESOLVE(SEC_what,      SEC_what);
 
-    // ---- Phase 1.1: token harvest ----
     RESOLVE(DeviceGUID_guid, DeviceGUID_guid);
     RESOLVE(Data_bytes,      Data_bytes);
 
@@ -188,21 +207,69 @@ bool Loader::open(const std::string& libs_dir) {
 
 #undef RESOLVE
 
+    clear_fairplay_symbols(&symbols_);
+    std::string fp_err;
+    // Match zhaarey/apple-music-downloader agent.js: FootHill + lease symbols are
+    // resolved from libandroidappmusic.so exports. Try that handle first, then
+    // RTLD_DEFAULT (bionic/global lookup can miss symbols visible via the DSO).
+    auto resolve_fp = [&](const char* mangled_name, auto* out_slot) -> bool {
+        void* const handles[] = {
+            h_libandroidappmusic_,
+            h_libmediaplatform_,
+            h_libstoreservicescore_,
+            nullptr,
+        };
+        for (int i = 0; handles[i] != nullptr; ++i) {
+            if (resolve(handles[i], mangled_name, out_slot, &fp_err)) return true;
+        }
+        return resolve(RTLD_DEFAULT, mangled_name, out_slot, &fp_err);
+    };
+#define RESOLVE_FP(field, name) fp_ok &= resolve_fp(mangled::name, &symbols_.field)
+
+    bool fp_ok = true;
+    fp_ok &= RESOLVE_FP(SVPlaybackLeaseManager_ctor, SVPlaybackLeaseManager_ctor);
+    fp_ok &= RESOLVE_FP(SVPlaybackLeaseManager_refreshLeaseAutomatically,
+                        SVPlaybackLeaseManager_refreshLeaseAutomatically);
+    fp_ok &= RESOLVE_FP(SVPlaybackLeaseManager_requestLease, SVPlaybackLeaseManager_requestLease);
+    fp_ok &= RESOLVE_FP(SVFootHillSessionCtrl_instance, SVFootHillSessionCtrl_instance);
+    fp_ok &= RESOLVE_FP(SVFootHillSessionCtrl_getPersistentKey,
+                        SVFootHillSessionCtrl_getPersistentKey);
+    fp_ok &= RESOLVE_FP(SVFootHillSessionCtrl_decryptContext,
+                        SVFootHillSessionCtrl_decryptContext);
+    fp_ok &= RESOLVE_FP(SVFootHillPContext_kdContext, SVFootHillPContext_kdContext);
+    fp_ok &= RESOLVE_FP(fp_sample_decrypt, fp_sample_decrypt);
+    fp_ok &= RESOLVE_FP(SVFootHillSessionCtrl_resetAllContexts,
+                        SVFootHillSessionCtrl_resetAllContexts);
+    fp_ok &= RESOLVE_FP(shared_ptr_SVFootHillPContext_dtor,
+                        shared_ptr_SVFootHillPContext_dtor);
+
+#undef RESOLVE_FP
+
+    if (!fp_ok) {
+        clear_fairplay_symbols(&symbols_);
+        fairplay_decrypt_available_ = false;
+        std::fprintf(stderr,
+                     "loader: FairPlay decrypt symbols unavailable (%s); "
+                     "POST /decrypt disabled\n",
+                     fp_err.c_str());
+    } else {
+        fairplay_decrypt_available_ = true;
+    }
+
     ok_ = true;
     last_error_.clear();
     return true;
 }
 
 void Loader::close() {
-    // We deliberately do NOT dlclose() the Apple libs. Apple's libs
-    // set up process-global state (DeviceGUID singleton, FootHill
-    // config) that does not cope with being torn down. The handles
-    // get released when the process exits.
-    ok_ = false;
-    symbols_ = Symbols{};
-    h_libstoreservicescore_ = nullptr;
-    h_libmediaplatform_     = nullptr;
-    h_libandroidappmusic_   = nullptr;
+    ok_                       = false;
+    fairplay_decrypt_available_ = false;
+    symbols_                  = Symbols{};
+    h_libstoreservicescore_   = nullptr;
+    h_libmediaplatform_       = nullptr;
+    h_libandroidappmusic_     = nullptr;
+    h_libcorefp_              = nullptr;
+    h_libcorelskd_            = nullptr;
 }
 
 }  // namespace wrapper::apple

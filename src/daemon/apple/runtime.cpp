@@ -5,8 +5,8 @@
 //     handlers. The dialog handler auto-selects "Use Existing Apple ID"
 //     when the title is "Sign In" (same as upstream), and always calls
 //     handleProtocolDialogResponse so AuthenticateFlow does not stall.
-//   - We do NOT spin up SVPlaybackLeaseManager. That's a decryption
-//     prerequisite and lives in Phase 1.4.
+//   - We install SVPlaybackLeaseManager + requestLease before exposing
+//     POST /decrypt, matching upstream main() after init_ctx.
 //   - Errors during init log to stderr; credential + ProtocolDialog
 //     callbacks log a single line each to stderr (no secrets).
 //
@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <new>
 #include <sstream>
 #include <string>
@@ -32,6 +33,17 @@ namespace wrapper::apple {
 namespace {
 
 constexpr int kDeviceInfoPartCount = 9;
+
+void end_lease_cb(const int& code) {
+    std::fprintf(stderr, "runtime: playback lease ended (code=%d)\n", code);
+}
+
+void pb_err_cb(void* /*unused*/) {
+    std::fprintf(stderr, "runtime: playback StoreErrorCondition callback\n");
+}
+
+std::function<void(const int&)> g_end_lease_fn(end_lease_cb);
+std::function<void(void*)>      g_pb_err_fn(pb_err_cb);
 
 // Apple's CredentialsResponse setters can retain references to string storage
 // past the callback return. Upstream passes global char buffers; keep equivalent
@@ -203,6 +215,31 @@ Runtime& Runtime::instance() {
     return r;
 }
 
+bool Runtime::init_playback_session(const Symbols& s) {
+    std::memset(lease_mgr_, 0, sizeof(lease_mgr_));
+    s.SVPlaybackLeaseManager_ctor(lease_mgr_, &g_end_lease_fn, &g_pb_err_fn);
+    std::uint8_t autom = 1;
+    s.SVPlaybackLeaseManager_refreshLeaseAutomatically(lease_mgr_, &autom);
+    s.SVPlaybackLeaseManager_requestLease(lease_mgr_, &autom);
+    foothill_ = s.SVFootHillSessionCtrl_instance();
+    if (foothill_ == nullptr) {
+        std::fprintf(stderr,
+                     "runtime: SVFootHillSessionCtrl::instance returned null\n");
+        return false;
+    }
+    return true;
+}
+
+void Runtime::refresh_playback_lease() {
+    if (loader_ == nullptr || !loader_->ok() || !playback_ready_) {
+        return;
+    }
+    const Symbols& s     = loader_->sym();
+    std::uint8_t   autom = 1;
+    std::lock_guard<std::mutex> lock(playback_mutex_);
+    s.SVPlaybackLeaseManager_requestLease(lease_mgr_, &autom);
+}
+
 bool Runtime::initialize(const Loader& loader, const RuntimeConfig& cfg) {
     std::lock_guard<std::mutex> g(mu_);
     if (initialized_.load(std::memory_order_relaxed)) return true;
@@ -230,9 +267,23 @@ bool Runtime::initialize(const Loader& loader, const RuntimeConfig& cfg) {
     if (!init_request_context(s, cfg, parts)) return false;
     if (!init_presentation_interface(s)) return false;
 
-    base_dir_ = cfg.base_dir;
+    base_dir_    = cfg.base_dir;
     device_info_ = cfg.device_info;
-    loader_ = &loader;
+    loader_      = &loader;
+
+    if (!loader.fairplay_decrypt_available()) {
+        playback_ready_ = false;
+        std::fprintf(stderr,
+                     "runtime: FairPlay decrypt chain not loaded; POST /decrypt unavailable\n");
+    } else {
+        playback_ready_ = init_playback_session(s);
+        if (!playback_ready_) {
+            std::fprintf(stderr,
+                         "runtime: warning: FairPlay playback init failed; "
+                         "POST /decrypt unavailable\n");
+        }
+    }
+
     initialized_.store(true, std::memory_order_release);
 
     return true;

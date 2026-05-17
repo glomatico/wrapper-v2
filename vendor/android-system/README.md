@@ -8,16 +8,17 @@ non-redistributable Apple libraries.
 
 Per arch under `<arch>/`:
 
-| File              | Source              | Why                                                      |
-| ----------------- | ------------------- | -------------------------------------------------------- |
-| `bin/linker64`    | AOSP `/system/bin/` | Android dynamic loader; resolves all `.so` dependencies. |
-| `lib64/libc.so`   | bionic              | Mandatory C runtime.                                     |
-| `lib64/libm.so`   | bionic              | Math.                                                    |
-| `lib64/libstdc++.so` | bionic           | Tiny stub. `libCoreFP`, `libCoreLSKD`, `libcurl` link against it. |
-| `lib64/liblog.so` | AOSP                | Android logging.                                         |
-| `lib64/libz.so`   | AOSP                | zlib.                                                    |
-| `lib64/libandroid.so` | AOSP            | NDK runtime API (loaded by 6 Apple libs).                |
-| `lib64/libOpenSLES.so` | AOSP           | Stub satisfying `DT_NEEDED` of `libandroidappmusic`. We never call into it. |
+| File                        | Source              | Why                                                                                                                                                                                                                                                                               |
+| --------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bin/linker64`              | AOSP `/system/bin/` | Android dynamic loader; resolves all `.so` dependencies.                                                                                                                                                                                                                          |
+| `lib64/libc.so`             | bionic              | Mandatory C runtime.                                                                                                                                                                                                                                                              |
+| `lib64/libm.so`             | bionic              | Math.                                                                                                                                                                                                                                                                             |
+| `lib64/libstdc++.so`        | bionic              | Tiny stub. `libCoreFP`, `libCoreLSKD`, `libcurl` link against it.                                                                                                                                                                                                                 |
+| `lib64/liblog.so`           | AOSP                | Android logging.                                                                                                                                                                                                                                                                  |
+| `lib64/libz.so`             | AOSP                | zlib.                                                                                                                                                                                                                                                                             |
+| `lib64/libandroid.so`       | AOSP                | NDK runtime API (loaded by 6 Apple libs).                                                                                                                                                                                                                                         |
+| `lib64/libOpenSLES.so`      | AOSP                | Stub satisfying `DT_NEEDED` of `libandroidappmusic`. We never call into it.                                                                                                                                                                                                       |
+| `usr/share/zoneinfo/tzdata` | AOSP                | Bionic timezone database. Optional; only suppresses `__bionic_open_tzdata` warnings on every `localtime`/`gmtime` call. Extract from any factory image at the same path (`simg2img system.img system.raw && debugfs -R "dump usr/share/zoneinfo/tzdata /tmp/tzdata" system.raw`). |
 
 `libdl.so` is intentionally absent. Android's `linker64` itself exports the
 `dl_*` symbols, so a separate `libdl.so` file is not required at runtime.

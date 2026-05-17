@@ -1,14 +1,14 @@
 // Apple Music native-library loader.
 //
-// `Loader::open()` dlopens libstoreservicescore.so + libmediaplatform.so +
-// libandroidappmusic.so (whose DT_NEEDED chains pull in the full Android
-// system-library closure), then resolves every mangled symbol declared
-// in apple/abi.hpp into a function-pointer table held in `Symbols`.
+// `Loader::open()` dlopens Apple's JNI stack (mediaplatform, storeservicescore,
+// androidappmusic) and optional FairPlay helpers (CoreFP / CoreLSKD), then
+// resolves mangled symbols into `Symbols`.
 //
 // The daemon ELF itself has *no* DT_NEEDED reference to Apple's libs -
 // this is what lets us start the daemon in stub mode even when the libs
-// have not been staged. If the libs are missing or a symbol fails to
-// resolve, `open()` returns false and the runtime stays unavailable.
+// have not been staged. If core libs are missing or a non-FairPlay
+// symbol fails to resolve, `open()` returns false. FairPlay-only symbols
+// may fail separately; see `fairplay_decrypt_available()`.
 
 #pragma once
 
@@ -18,9 +18,10 @@
 
 namespace wrapper::apple {
 
-// Function-pointer table populated by Loader::open(). All fields are
-// non-null after a successful open(); read access while ok()==false
-// is undefined.
+// Function-pointer table populated by Loader::open(). Core auth/token
+// fields are non-null after ok()==true. FairPlay decrypt pointers (lease,
+// FootHill, fp_sample_decrypt) are set only when fairplay_decrypt_available()
+// is true; otherwise they may be null even if ok().
 struct Symbols {
     // Vtables for std::__shared_ptr_emplace<T, ...>. Stored as `void**`
     // so callers can do the upstream-style pointer arithmetic (skip
@@ -102,6 +103,18 @@ struct Symbols {
     abi::fn_URLResponse_underlyingResponse URLResponse_underlyingResponse = nullptr;
 
     abi::fn_RequestContext_storeFrontIdentifier RequestContext_storeFrontIdentifier = nullptr;
+
+    // ---- Phase 1.3: FairPlay decrypt ----
+    abi::fn_SVPlaybackLeaseManager_ctor                      SVPlaybackLeaseManager_ctor                      = nullptr;
+    abi::fn_SVPlaybackLeaseManager_refreshLeaseAutomatically SVPlaybackLeaseManager_refreshLeaseAutomatically = nullptr;
+    abi::fn_SVPlaybackLeaseManager_requestLease              SVPlaybackLeaseManager_requestLease              = nullptr;
+    abi::fn_SVFootHillSessionCtrl_instance                   SVFootHillSessionCtrl_instance                   = nullptr;
+    abi::fn_SVFootHillSessionCtrl_getPersistentKey           SVFootHillSessionCtrl_getPersistentKey           = nullptr;
+    abi::fn_SVFootHillSessionCtrl_decryptContext             SVFootHillSessionCtrl_decryptContext             = nullptr;
+    abi::fn_SVFootHillPContext_kdContext                     SVFootHillPContext_kdContext                     = nullptr;
+    abi::fn_fp_sample_decrypt                                fp_sample_decrypt                                = nullptr;
+    abi::fn_SVFootHillSessionCtrl_resetAllContexts           SVFootHillSessionCtrl_resetAllContexts           = nullptr;
+    abi::fn_shared_ptr_SVFootHillPContext_dtor               shared_ptr_SVFootHillPContext_dtor               = nullptr;
 };
 
 class Loader {
@@ -123,6 +136,9 @@ public:
 
     bool ok() const { return ok_; }
 
+    // True when FairPlay decrypt dlsyms all succeeded (lease + FootHill + sample op).
+    bool fairplay_decrypt_available() const { return fairplay_decrypt_available_; }
+
     const Symbols& sym() const { return symbols_; }
 
     // Last failure description (path of the lib, symbol name, dlerror()).
@@ -133,9 +149,12 @@ private:
     void* h_libstoreservicescore_ = nullptr;
     void* h_libmediaplatform_     = nullptr;
     void* h_libandroidappmusic_   = nullptr;
+    void* h_libcorefp_            = nullptr;
+    void* h_libcorelskd_          = nullptr;
 
-    Symbols symbols_;
-    bool ok_ = false;
+    Symbols     symbols_;
+    bool        ok_{false};
+    bool        fairplay_decrypt_available_{false};
     std::string last_error_;
 };
 
