@@ -6,12 +6,8 @@
 # Runtime mount for docker compose
 /data/
 
-# Extracted Apple libs (never committed)
-/rootfs/system/lib64/*.so
-/rootfs/system/bin/main
-/rootfs/system/bin/linker64
-/rootfs/system/bin/linker
-/rootfs/dev/
+# Local rootfs overlay (IANA DB is vendored under vendor/android-system/…/zoneinfo)
+/rootfs/
 
 # Final binaries at repo root (produced by build)
 /wrapper
