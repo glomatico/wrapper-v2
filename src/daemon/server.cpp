@@ -460,7 +460,7 @@ void Server::mount() {
         apple::PlaybackResult pr;
         {
             // PurchaseRequest drives Apple's URLBag dispatcher; same global
-            // state /decrypt/sample touches, so share the playback mutex to avoid
+            // state /decrypt touches, so share the playback mutex to avoid
             // overlap with a concurrent decrypt request.
             std::lock_guard<std::mutex> lock(rt_.playback_mutex());
             pr = apple::fetch_playback_json(loader_, rt_, std::move(adam_id));
@@ -477,7 +477,7 @@ void Server::mount() {
         respond_json(res, 200, std::move(pr.body));
     });
 
-    // ---- POST /decrypt/sample ----
+    // ---- POST /decrypt ----
     // FairPlay sample decrypt. Binary request:
     //   u32be adam_id_len, u32be uri_len, u32be sample_count,
     //   u32be sample_len[sample_count], adam_id bytes, uri bytes,
@@ -486,7 +486,7 @@ void Server::mount() {
     //   u32be sample_count, u32be sample_len[sample_count],
     //   concatenated plaintext samples.
     // Requires authenticated + playback_ready.
-    svr_.Post("/decrypt/sample", [this](const httplib::Request& req, httplib::Response& res) {
+    svr_.Post("/decrypt", [this](const httplib::Request& req, httplib::Response& res) {
         access_log("POST", req);
         if (!rt_.initialized()) {
             respond_json(res, 503, json{

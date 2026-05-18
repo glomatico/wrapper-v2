@@ -71,7 +71,7 @@ public:
     // pointer through Apple's callback ABI.
     const Loader* loader() const { return loader_; }
 
-    // FairPlay sample decrypt (POST /decrypt/sample). Requires successful
+    // FairPlay sample decrypt (POST /decrypt). Requires successful
     // SVPlaybackLeaseManager + SVFootHillSessionCtrl init at startup.
     bool playback_ready() const { return playback_ready_; }
     void* foothill_session() const { return foothill_; }

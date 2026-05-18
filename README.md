@@ -19,7 +19,7 @@ library digests do not match.
 
 ## HTTP API
 
-Most endpoints accept and return `application/json`. `POST /decrypt/sample`
+Most endpoints accept and return `application/json`. `POST /decrypt`
 uses `application/octet-stream` for successful request and response bodies;
 errors still return JSON.
 
@@ -30,10 +30,10 @@ errors still return JSON.
 | `POST`   | `/login`          | Body: `{"username": "...", "password": "..."}` or `{"apple_id": "...", "password": "..."}` (synonyms). Drives Apple's `AuthenticateFlow`. Returns `200` + token snapshot, `202` if **2FA** is required (then `POST /login/2fa`), or `401` on failure.                                                                                                                              |
 | `POST`   | `/login/2fa`      | Body: `{"code": "123456"}`. Continues a login waiting for HSA2.                                                                                                                                                                                                                                                                                                                    |
 | `GET`    | `/playback`       | Query string `?adam_id=<numeric store id>`. Returns `200` with a JSON object `{"songList":[...]}` containing the **whole MZ playback dispatch** Apple's `subDownload` URL bag returns (every flavor, key URI, asset URL, metadata field). CFData fields are base64; CFDate fields are ISO 8601. Needs an **authenticated** session; otherwise `401` / `503`. Apple errors → `502`. |
-| `POST`   | `/decrypt/sample` | Binary FairPlay sample decrypt batch. Request frame contains `adam_id`, SKD `uri`, and one or more encrypted samples. Response frame contains plaintext samples. Needs **authenticated** session and `playback_ready`; otherwise `401` / `503`. Apple errors → `502`.                                                                                                              |
+| `POST`   | `/decrypt` | Binary FairPlay sample decrypt batch. Request frame contains `adam_id`, SKD `uri`, and one or more encrypted samples. Response frame contains plaintext samples. Needs **authenticated** session and `playback_ready`; otherwise `401` / `503`. Apple errors → `502`.                                                                                                              |
 | `DELETE` | `/login`          | Aborts an in-flight login or clears cached tokens from memory. Apple's on-disk `mpl_db` cache is unchanged.                                                                                                                                                                                                                                                                        |
 
-### `POST /decrypt/sample` Binary Format
+### `POST /decrypt` Binary Format
 
 All integer fields are unsigned 32-bit big-endian.
 

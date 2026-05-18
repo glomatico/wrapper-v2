@@ -398,7 +398,7 @@ bool Loader::open(const std::string& libs_dir) {
         fairplay_decrypt_available_ = false;
         std::fprintf(stderr,
                      "loader: FairPlay decrypt symbols unavailable (%s); "
-                     "POST /decrypt/sample disabled\n",
+                     "POST /decrypt disabled\n",
                      fp_err.c_str());
     } else {
         fairplay_decrypt_available_ = true;

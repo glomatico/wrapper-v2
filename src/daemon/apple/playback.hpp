@@ -28,7 +28,7 @@ struct PlaybackResult {
 
 // Blocking. Caller must hold runtime.playback_mutex() (Apple's
 // PurchaseRequest dispatch uses process-global state we share with
-// /decrypt/sample). Requires runtime.initialized() and an authenticated account.
+// /decrypt). Requires runtime.initialized() and an authenticated account.
 PlaybackResult fetch_playback_json(const Loader& loader,
                                    Runtime&      runtime,
                                    std::string   adam_id);

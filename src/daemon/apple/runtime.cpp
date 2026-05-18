@@ -6,7 +6,7 @@
 //     when the title is "Sign In" (same as upstream), and always calls
 //     handleProtocolDialogResponse so AuthenticateFlow does not stall.
 //   - We install SVPlaybackLeaseManager + requestLease before exposing
-//     POST /decrypt/sample, matching upstream main() after init_ctx.
+//     POST /decrypt, matching upstream main() after init_ctx.
 //   - Errors during init log to stderr; credential + ProtocolDialog
 //     callbacks log a single line each to stderr (no secrets).
 //
@@ -304,13 +304,13 @@ bool Runtime::initialize(const Loader& loader, const RuntimeConfig& cfg) {
     if (!loader.fairplay_decrypt_available()) {
         playback_ready_ = false;
         std::fprintf(stderr,
-                     "runtime: FairPlay decrypt chain not loaded; POST /decrypt/sample unavailable\n");
+                     "runtime: FairPlay decrypt chain not loaded; POST /decrypt unavailable\n");
     } else {
         playback_ready_ = init_playback_session(s);
         if (!playback_ready_) {
             std::fprintf(stderr,
                          "runtime: warning: FairPlay playback init failed; "
-                         "POST /decrypt/sample unavailable\n");
+                         "POST /decrypt unavailable\n");
         }
     }
 
