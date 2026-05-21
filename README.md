@@ -143,37 +143,64 @@ not provide the download for those files.
 
 ### Local build
 
+#### 1. Extract Apple Music native libraries
+
+Provide a local Apple Music `.apk` or `.apkm` for the target architecture. The
+default output is `rootfs/system/lib64/`, and every extracted `.so` must match
+the hashes in `LIBS_VERSION.json`.
+
 ```bash
-# 1. Extract Apple Music native libraries from a local .apk or .apkm you provide.
-#    Default --out is rootfs/system/lib64; each .so must match .libs.<arch>.
-tools/extract-libs.sh --bundle path/to/local/apple-music.apk --arch x86_64
-# .apkm bundles are also accepted:
-# tools/extract-libs.sh --bundle path/to/local/apple-music.apkm --arch x86_64
+bash tools/extract-libs.sh --bundle path/to/local/apple-music.apk --arch x86_64
+```
 
-# 2. Stage the committed Android system binaries (linker64 + bionic + AOSP)
-#    into rootfs/, verifying their SHA-256 against LIBS_VERSION.json.
-tools/stage-system.sh --arch x86_64
+`.apkm` bundles are also accepted:
 
-# 3. Make sure Apple Music native libraries for x86_64 are present in
-#    rootfs/system/lib64/ and match LIBS_VERSION.json.
+```bash
+bash tools/extract-libs.sh --bundle path/to/local/apple-music.apkm --arch x86_64
+```
 
-# 4. Build and run.
+#### 2. Stage Android system binaries
+
+This copies the committed Android linker and system libraries into `rootfs/`,
+verifying their SHA-256 hashes against `LIBS_VERSION.json`.
+
+```bash
+bash tools/stage-system.sh --arch x86_64
+```
+
+#### 3. Build and run
+
+```bash
 docker compose up --build
+```
 
-# 5. Smoke-test.
+#### 4. Smoke test
+
+```bash
 curl http://127.0.0.1/health
 curl http://127.0.0.1/me
+```
 
-# 6. Sign in (use your real Apple ID).
+#### 5. Sign in
+
+Use your real Apple ID. If the first request returns `202`, continue with the
+2FA request.
+
+```bash
 curl -X POST http://127.0.0.1/login \
      -H 'content-type: application/json' \
      -d '{"username":"you@example.com","password":"your-app-specific-password"}'
+```
 
-# 7. Enter 2FA if /login returns 202.
+```bash
 curl -X POST http://127.0.0.1/login/2fa \
      -H 'content-type: application/json' \
      -d '{"code":"123456"}'
+```
 
+Check the current session or clear the in-memory login state:
+
+```bash
 curl http://127.0.0.1/me
 curl -X DELETE http://127.0.0.1/login
 ```
@@ -193,12 +220,23 @@ x86_64-host ZIP only). The image then cross-compiles `wrapper` for AArch64 when
 `TARGET_ARCH=arm64-v8a`. Set **runtime** platform to arm64; `BUILD_PLATFORM` in Compose is
 ignored but kept for compatibility.
 
-```bash
-tools/extract-libs.sh --bundle path/to/local/apple-music.apk --arch arm64-v8a
-# Or use a local .apkm bundle:
-# tools/extract-libs.sh --bundle path/to/local/apple-music.apkm --arch arm64-v8a
-tools/stage-system.sh --arch arm64-v8a
+Extract and stage the arm64 files:
 
+```bash
+bash tools/extract-libs.sh --bundle path/to/local/apple-music.apk --arch arm64-v8a
+bash tools/stage-system.sh --arch arm64-v8a
+```
+
+Or use a local `.apkm` bundle:
+
+```bash
+bash tools/extract-libs.sh --bundle path/to/local/apple-music.apkm --arch arm64-v8a
+bash tools/stage-system.sh --arch arm64-v8a
+```
+
+Build the arm64 image:
+
+```bash
 TARGET_ARCH=arm64-v8a RUNTIME_PLATFORM=linux/arm64 \
   docker compose up --build
 ```
