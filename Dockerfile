@@ -55,6 +55,11 @@ RUN curl -fSL -o /tmp/ndk.zip \
     rm /tmp/ndk.zip
 ENV ANDROID_NDK_HOME=/opt/android-ndk-r${NDK_VERSION}b
 
+ENV CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
+    PATH=/usr/local/cargo/bin:${PATH}
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+
 WORKDIR /app
 COPY . /app
 
@@ -83,6 +88,17 @@ RUN host_cc=(); \
         -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" && \
     cmake --build build -j
 
+RUN if [[ "$TARGET_ARCH" == "arm64-v8a" ]]; then \
+      rustup target add aarch64-unknown-linux-gnu && \
+      mkdir -p .cargo && \
+      printf '[target.aarch64-unknown-linux-gnu]\nlinker = "aarch64-linux-gnu-gcc"\n' > .cargo/config.toml && \
+      cargo build --release --target aarch64-unknown-linux-gnu && \
+      cp target/aarch64-unknown-linux-gnu/release/wrapperd /app/wrapperd; \
+    else \
+      cargo build --release && \
+      cp target/release/wrapperd /app/wrapperd; \
+    fi
+
 # -----------------------------------------------------------------------------
 # Runtime stage
 # -----------------------------------------------------------------------------
@@ -91,6 +107,7 @@ FROM --platform=${RUNTIME_PLATFORM} debian:13.2
 WORKDIR /app
 
 COPY --from=build /app/wrapper        /app/wrapper
+COPY --from=build /app/wrapperd       /app/wrapperd
 COPY --from=build /app/rootfs         /app/rootfs
 
 # Apple's libcurl inside the chroot needs CA certificates for SSL verification.
@@ -98,6 +115,6 @@ COPY --from=build /app/rootfs         /app/rootfs
 # where the launcher will point SSL_CERT_FILE / CURL_CA_BUNDLE at it.
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /app/rootfs/etc/ssl/certs/ca-certificates.crt
 
-EXPOSE 80
+EXPOSE 80 10020
 
-ENTRYPOINT ["/app/wrapper"]
+ENTRYPOINT ["/app/wrapperd"]

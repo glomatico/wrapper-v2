@@ -18,6 +18,7 @@ services:
       - apparmor:unconfined
     ports:
       - "${HTTP_PORT:-80}:80"
+      - "${DECRYPT_PORT:-10020}:10020"
     environment:
       WRAPPER_USERNAME: ${WRAPPER_USERNAME:-}
       WRAPPER_PASSWORD: ${WRAPPER_PASSWORD:-}
