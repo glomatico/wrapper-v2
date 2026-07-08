@@ -46,29 +46,52 @@ through HTTP; clients use the raw TCP decrypt protocol on
 
 ## TCP Decrypt API
 
-The decrypt listener defaults to `0.0.0.0:10020`, matching the original
-`WorldObservationLog/wrapper` decrypt port. The Compose file maps this as
-`${DECRYPT_PORT:-10020}:10020`.
+The decrypt listener defaults to `0.0.0.0:10020`. The Compose file maps this as
+`${DECRYPT_PORT:-10020}:10020`. This branch uses wrapper-v2's versioned batch
+protocol; it is not wire-compatible with the original wrapper sample stream.
 
-Per TCP connection:
+All integers are big-endian. Request and response frames share this envelope:
 
 ```text
-u8 adam_id_len
-adam_id bytes
-u8 uri_len
-uri bytes
-
-loop:
-  native-endian u32 sample_len
-  if sample_len == 0:
-    end the current adam/uri group and wait for the next group
-  encrypted sample bytes
-  decrypted sample bytes of the same length
+magic        4 bytes  "WV2D"
+version      u16      1
+kind         u16      1 = decrypt batch, 2 = decrypt ok, 3 = decrypt error, 9 = close
+request_id   u32
+payload_len  u32
+payload      payload_len bytes
 ```
 
-`adam_id_len == 0` or `uri_len == 0` closes the connection. Decrypt errors,
-worker crashes, or worker timeouts close the affected TCP client connection; the
-Rust supervisor starts a fresh Apple worker for later requests.
+Decrypt batch payload:
+
+```text
+adam_id_len
+uri_len
+sample_count
+sample_len[0]
+...
+sample_len[sample_count - 1]
+adam_id bytes
+uri bytes
+sample[0] bytes
+...
+sample[sample_count - 1] bytes
+```
+
+Successful decrypt payload:
+
+```text
+sample_count
+sample_len[0]
+...
+sample_len[sample_count - 1]
+sample[0] bytes
+...
+sample[sample_count - 1] bytes
+```
+
+Error payloads are UTF-8 messages. Decrypt errors, worker crashes, or worker
+timeouts close the affected TCP client connection; the Rust supervisor starts a
+fresh Apple worker for later requests.
 
 Sign-in matches the legacy wrapper model: you send **email (Apple ID) and password**
 to the daemon; it fills credentials through the native presentation interface.
