@@ -1,10 +1,11 @@
 use std::fmt;
-use std::io::{BufReader, BufWriter};
+use std::io::{self, BufWriter, Read};
+use std::os::fd::AsRawFd;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -37,12 +38,13 @@ pub struct WorkerResponse {
 struct WorkerProcess {
     child: Child,
     stdin: BufWriter<ChildStdin>,
-    stdout: BufReader<ChildStdout>,
+    stdout: ChildStdout,
 }
 
 pub struct Worker {
     launcher: String,
     version: String,
+    request_timeout: Duration,
     next_id: AtomicU32,
     proc: Mutex<Option<WorkerProcess>>,
 }
@@ -52,6 +54,7 @@ impl Worker {
         Self {
             launcher: launcher.to_string(),
             version,
+            request_timeout: worker_timeout(),
             next_id: AtomicU32::new(1),
             proc: Mutex::new(None),
         }
@@ -136,14 +139,23 @@ impl Worker {
             *guard = None;
             return Err(WorkerError::Io(e.to_string()));
         }
-        let resp = match protocol::read_frame(&mut proc.stdout) {
+        let resp = match read_frame_timeout(&mut proc.stdout, self.request_timeout) {
             Ok(frame) => frame,
             Err(e) => {
+                if e.kind() == io::ErrorKind::TimedOut {
+                    eprintln!(
+                        "wrapperd: worker request opcode={opcode} timed out after {:?}; restarting worker",
+                        self.request_timeout
+                    );
+                    kill_worker(proc);
+                }
                 *guard = None;
                 return Err(WorkerError::Io(e.to_string()));
             }
         };
         if resp.kind != protocol::KIND_RESPONSE || resp.request_id != id || resp.opcode != opcode {
+            kill_worker(proc);
+            *guard = None;
             return Err(WorkerError::Protocol("mismatched ipc response".to_string()));
         }
         Ok(resp)
@@ -170,7 +182,7 @@ impl Worker {
         Ok(WorkerProcess {
             child,
             stdin: BufWriter::new(stdin),
-            stdout: BufReader::new(stdout),
+            stdout,
         })
     }
 
@@ -191,8 +203,124 @@ impl Worker {
     }
 }
 
-fn io_err(e: std::io::Error) -> WorkerError {
+fn worker_timeout() -> Duration {
+    std::env::var("WRAPPER_WORKER_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(120))
+}
+
+fn io_err(e: io::Error) -> WorkerError {
     WorkerError::Io(e.to_string())
+}
+
+fn kill_worker(proc: &mut WorkerProcess) {
+    let _ = proc.child.kill();
+    let _ = proc.child.wait();
+}
+
+fn read_frame_timeout(stdout: &mut ChildStdout, timeout: Duration) -> io::Result<protocol::Frame> {
+    let deadline = Instant::now() + timeout;
+    let mut h = [0u8; 20];
+    read_exact_timeout(stdout, &mut h, deadline)?;
+    let magic = u32::from_be_bytes([h[0], h[1], h[2], h[3]]);
+    let version = u16::from_be_bytes([h[4], h[5]]);
+    if magic != protocol::MAGIC {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "bad ipc magic"));
+    }
+    if version != protocol::VERSION {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "bad ipc version",
+        ));
+    }
+    let kind = u16::from_be_bytes([h[6], h[7]]);
+    let request_id = u32::from_be_bytes([h[8], h[9], h[10], h[11]]);
+    let opcode = u16::from_be_bytes([h[12], h[13]]);
+    let flags = u16::from_be_bytes([h[14], h[15]]);
+    let payload_len = u32::from_be_bytes([h[16], h[17], h[18], h[19]]) as usize;
+    let mut payload = vec![0u8; payload_len];
+    read_exact_timeout(stdout, &mut payload, deadline)?;
+    Ok(protocol::Frame {
+        kind,
+        request_id,
+        opcode,
+        flags,
+        payload,
+    })
+}
+
+fn read_exact_timeout<R: Read + AsRawFd>(
+    reader: &mut R,
+    mut buf: &mut [u8],
+    deadline: Instant,
+) -> io::Result<()> {
+    while !buf.is_empty() {
+        wait_readable(reader.as_raw_fd(), deadline)?;
+        match reader.read(buf) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "worker stdout closed",
+                ))
+            }
+            Ok(n) => {
+                let tmp = buf;
+                buf = &mut tmp[n..];
+            }
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+fn wait_readable(fd: i32, deadline: Instant) -> io::Result<()> {
+    let mut pfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "worker ipc response timed out",
+            ));
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        let timeout_ms = remaining.as_millis().min(i32::MAX as u128) as i32;
+        pfd.revents = 0;
+        let n = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
+        if n > 0 {
+            if pfd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "worker stdout closed",
+                ));
+            }
+            return Ok(());
+        }
+        if n == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "worker ipc response timed out",
+            ));
+        }
+        let e = io::Error::last_os_error();
+        if e.kind() != io::ErrorKind::Interrupted {
+            return Err(e);
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "worker ipc response timed out",
+            ));
+        }
+    }
 }
 
 fn parse_worker_response(frame: protocol::Frame) -> Result<WorkerResponse, WorkerError> {
