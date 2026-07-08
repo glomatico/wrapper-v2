@@ -209,7 +209,7 @@ fn worker_timeout() -> Duration {
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v > 0)
         .map(Duration::from_secs)
-        .unwrap_or_else(|| Duration::from_secs(120))
+        .unwrap_or_else(|| Duration::from_secs(60))
 }
 
 fn io_err(e: io::Error) -> WorkerError {
