@@ -163,11 +163,31 @@ fn handle_http_connection(mut stream: TcpStream, worker: Arc<Worker>) -> io::Res
             worker.request_json(protocol::OP_ME, Value::Null),
         )?,
         ("POST", "/login") => {
-            let v = parse_json_body(&body)?;
+            let v = match parse_json_body(&body) {
+                Ok(v) => v,
+                Err(e) => {
+                    write_json(
+                        &mut stream,
+                        400,
+                        json!({"error":"invalid_json","detail":e.to_string()}),
+                    )?;
+                    return Ok(());
+                }
+            };
             proxy_json(&mut stream, worker.request_json(protocol::OP_LOGIN, v))?;
         }
         ("POST", "/login/2fa") => {
-            let v = parse_json_body(&body)?;
+            let v = match parse_json_body(&body) {
+                Ok(v) => v,
+                Err(e) => {
+                    write_json(
+                        &mut stream,
+                        400,
+                        json!({"error":"invalid_json","detail":e.to_string()}),
+                    )?;
+                    return Ok(());
+                }
+            };
             proxy_json(&mut stream, worker.request_json(protocol::OP_LOGIN_2FA, v))?;
         }
         ("DELETE", "/login") => proxy_json(

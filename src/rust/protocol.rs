@@ -91,3 +91,46 @@ pub fn decrypt_payload(adam: &str, uri: &str, sample: &[u8]) -> io::Result<Vec<u
     out.extend_from_slice(sample);
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_round_trip() {
+        let frame = Frame {
+            kind: KIND_REQUEST,
+            request_id: 42,
+            opcode: OP_HEALTH,
+            flags: 7,
+            payload: b"hello".to_vec(),
+        };
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, &frame).unwrap();
+        let decoded = read_frame(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.kind, frame.kind);
+        assert_eq!(decoded.request_id, frame.request_id);
+        assert_eq!(decoded.opcode, frame.opcode);
+        assert_eq!(decoded.flags, frame.flags);
+        assert_eq!(decoded.payload, frame.payload);
+    }
+
+    #[test]
+    fn bad_magic_is_rejected() {
+        let mut bytes = vec![0u8; 20];
+        bytes[4..6].copy_from_slice(&VERSION.to_be_bytes());
+        let err = read_frame(bytes.as_slice()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn decrypt_payload_layout() {
+        let out = decrypt_payload("123", "skd://x", &[1, 2, 3, 4]).unwrap();
+        assert_eq!(&out[0..2], &3u16.to_be_bytes());
+        assert_eq!(&out[2..4], &7u16.to_be_bytes());
+        assert_eq!(&out[4..8], &4u32.to_be_bytes());
+        assert_eq!(&out[8..11], b"123");
+        assert_eq!(&out[11..18], b"skd://x");
+        assert_eq!(&out[18..], &[1, 2, 3, 4]);
+    }
+}
