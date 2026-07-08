@@ -85,17 +85,18 @@ impl Worker {
         parse_worker_response(frame)
     }
 
-    pub fn decrypt_sample(
+    pub fn decrypt_batch(
         &self,
         adam: &str,
         uri: &str,
-        sample: Vec<u8>,
-    ) -> Result<Vec<u8>, WorkerError> {
-        let payload = protocol::decrypt_payload(adam, uri, &sample)
+        samples: Vec<Vec<u8>>,
+    ) -> Result<Vec<Vec<u8>>, WorkerError> {
+        let payload = protocol::decrypt_batch_payload(adam, uri, &samples)
             .map_err(|e| WorkerError::Protocol(e.to_string()))?;
-        let frame = self.request(protocol::OP_DECRYPT_SAMPLE, payload)?;
+        let frame = self.request(protocol::OP_DECRYPT_BATCH, payload)?;
         if frame.flags & 1 == 1 {
-            return Ok(frame.payload);
+            return protocol::parse_decrypt_samples_payload(&frame.payload)
+                .map_err(|e| WorkerError::Protocol(e.to_string()));
         }
         let r = parse_worker_response(frame)?;
         if r.restart_worker {

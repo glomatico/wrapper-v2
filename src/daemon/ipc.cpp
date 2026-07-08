@@ -39,7 +39,7 @@ enum Opcode : std::uint16_t {
     OpLogin2fa = 4,
     OpLogout = 5,
     OpPlayback = 6,
-    OpDecryptSample = 7,
+    OpDecryptBatch = 7,
     OpShutdown = 8,
 };
 
@@ -407,26 +407,60 @@ Frame handle_playback(const Frame& req,
 bool parse_decrypt_payload(const Frame& req,
                            std::string* adam_id,
                            std::string* uri,
-                           std::vector<std::uint8_t>* sample) {
+                           std::vector<std::vector<std::uint8_t>>* samples) {
     if (req.payload.size() < 8) return false;
     const auto* p = req.payload.data();
     const std::uint16_t adam_len = read_u16_be(p);
     const std::uint16_t uri_len = read_u16_be(p + 2);
-    const std::uint32_t sample_len = read_u32_be(p + 4);
-    const std::uint64_t expected = 8ull + adam_len + uri_len + sample_len;
-    if (expected != req.payload.size()) return false;
-    if (adam_len == 0 || uri_len == 0 || sample_len == 0) return false;
-    const char* s = reinterpret_cast<const char*>(p + 8);
+    const std::uint32_t sample_count = read_u32_be(p + 4);
+    if (adam_len == 0 || uri_len == 0 || sample_count == 0) return false;
+    const std::uint64_t table_bytes = static_cast<std::uint64_t>(sample_count) * 4ull;
+    const std::uint64_t fixed = 8ull + table_bytes + adam_len + uri_len;
+    if (fixed > req.payload.size()) return false;
+
+    std::vector<std::uint32_t> lengths;
+    lengths.reserve(sample_count);
+    std::uint64_t sample_bytes = 0;
+    const auto* lenp = p + 8;
+    for (std::uint32_t i = 0; i < sample_count; ++i) {
+        const std::uint32_t n = read_u32_be(lenp + (static_cast<std::size_t>(i) * 4u));
+        if (n == 0) return false;
+        sample_bytes += n;
+        if (sample_bytes > 256ull * 1024ull * 1024ull) return false;
+        lengths.push_back(n);
+    }
+    if (fixed + sample_bytes != req.payload.size()) return false;
+
+    const char* s = reinterpret_cast<const char*>(p + 8 + table_bytes);
     adam_id->assign(s, adam_len);
     s += adam_len;
     uri->assign(s, uri_len);
     s += uri_len;
-    const auto* b = reinterpret_cast<const std::uint8_t*>(s);
-    sample->assign(b, b + sample_len);
+    samples->clear();
+    samples->reserve(sample_count);
+    for (std::uint32_t n : lengths) {
+        const auto* b = reinterpret_cast<const std::uint8_t*>(s);
+        samples->emplace_back(b, b + n);
+        s += n;
+    }
     return true;
 }
 
-Frame handle_decrypt_sample(const Frame& req,
+std::vector<std::uint8_t> build_decrypt_response_payload(
+    const std::vector<std::vector<std::uint8_t>>& samples) {
+    std::vector<std::uint8_t> out;
+    out.reserve(4 + samples.size() * 4);
+    append_u32_be(&out, static_cast<std::uint32_t>(samples.size()));
+    for (const auto& sample : samples) {
+        append_u32_be(&out, static_cast<std::uint32_t>(sample.size()));
+    }
+    for (const auto& sample : samples) {
+        out.insert(out.end(), sample.begin(), sample.end());
+    }
+    return out;
+}
+
+Frame handle_decrypt_batch(const Frame& req,
                             apple::Account& account,
                             const apple::Loader& loader,
                             apple::Runtime& rt) {
@@ -450,27 +484,26 @@ Frame handle_decrypt_sample(const Frame& req,
     }
     std::string adam_id;
     std::string uri;
-    std::vector<std::uint8_t> sample;
-    if (!parse_decrypt_payload(req, &adam_id, &uri, &sample)) {
+    std::vector<std::vector<std::uint8_t>> samples;
+    if (!parse_decrypt_payload(req, &adam_id, &uri, &samples)) {
         return json_response(req, 400, json{
             {"error", "invalid_frame"},
-            {"detail", "invalid decrypt sample payload"},
+            {"detail", "invalid decrypt batch payload"},
         });
     }
+    const std::size_t expected_count = samples.size();
     apple::DecryptResult dr;
     {
         std::lock_guard<std::mutex> lock(rt.playback_mutex());
-        std::vector<std::vector<std::uint8_t>> samples;
-        samples.push_back(std::move(sample));
         dr = apple::decrypt_samples(loader, rt, std::move(adam_id), std::move(uri), std::move(samples));
     }
-    if (!dr.ok || dr.plaintexts.size() != 1) {
+    if (!dr.ok || dr.plaintexts.size() != expected_count) {
         return json_response(req, 502, json{
             {"error", "decrypt_failed"},
             {"detail", dr.error.empty() ? "FairPlay decrypt failed" : dr.error},
         }, true, true);
     }
-    return binary_response(req, std::move(dr.plaintexts[0]));
+    return binary_response(req, build_decrypt_response_payload(dr.plaintexts));
 }
 
 Frame dispatch(const Frame& req,
@@ -486,7 +519,7 @@ Frame dispatch(const Frame& req,
             case OpLogin2fa: return handle_login_2fa(req, account);
             case OpLogout: return handle_logout(req, account);
             case OpPlayback: return handle_playback(req, account, loader, rt);
-            case OpDecryptSample: return handle_decrypt_sample(req, account, loader, rt);
+            case OpDecryptBatch: return handle_decrypt_batch(req, account, loader, rt);
             case OpShutdown: std::exit(0);
             default:
                 return json_response(req, 400, json{

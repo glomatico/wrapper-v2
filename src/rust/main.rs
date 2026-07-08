@@ -341,59 +341,170 @@ fn run_decrypt_tcp(addr: &str, worker: Arc<Worker>) -> io::Result<()> {
 }
 
 fn handle_decrypt_client(mut stream: TcpStream, worker: Arc<Worker>) -> io::Result<()> {
+    stream.set_nodelay(true)?;
     stream.set_read_timeout(Some(Duration::from_secs(60)))?;
     stream.set_write_timeout(Some(Duration::from_secs(60)))?;
     loop {
-        let mut n = [0u8; 1];
-        if stream.read_exact(&mut n).is_err() {
+        let frame = match protocol::read_decrypt_frame(&mut stream) {
+            Ok(frame) => frame,
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        if frame.kind == protocol::DECRYPT_KIND_CLOSE {
             return Ok(());
         }
-        let adam_len = n[0] as usize;
-        if adam_len == 0 {
+        if frame.kind != protocol::DECRYPT_KIND_BATCH {
+            write_decrypt_error(
+                &mut stream,
+                frame.request_id,
+                "unsupported decrypt frame kind",
+            )?;
             return Ok(());
         }
-        let mut adam = vec![0u8; adam_len];
-        stream.read_exact(&mut adam)?;
-
-        stream.read_exact(&mut n)?;
-        let uri_len = n[0] as usize;
-        if uri_len == 0 {
-            return Ok(());
-        }
-        let mut uri = vec![0u8; uri_len];
-        stream.read_exact(&mut uri)?;
-
-        let adam = String::from_utf8_lossy(&adam).to_string();
-        let uri = String::from_utf8_lossy(&uri).to_string();
-        loop {
-            let mut len = [0u8; 4];
-            stream.read_exact(&mut len)?;
-            let sample_len = u32::from_ne_bytes(len) as usize;
-            if sample_len == 0 {
-                break;
+        let (adam, uri, samples) = match parse_decrypt_batch_payload(&frame.payload) {
+            Ok(v) => v,
+            Err(e) => {
+                write_decrypt_error(&mut stream, frame.request_id, &e.to_string())?;
+                return Ok(());
             }
-            if sample_len > 64 * 1024 * 1024 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "sample too large",
-                ));
+        };
+        let plaintexts = match worker.decrypt_batch(&adam, &uri, samples) {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = write_decrypt_error(&mut stream, frame.request_id, &e.to_string());
+                let _ = stream.shutdown(Shutdown::Both);
+                return Err(worker_io_error(e));
             }
-            let mut sample = vec![0u8; sample_len];
-            stream.read_exact(&mut sample)?;
-            let plaintext = match worker.decrypt_sample(&adam, &uri, sample) {
-                Ok(p) if p.len() == sample_len => p,
-                Ok(_) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "worker returned wrong sample length",
-                    ))
-                }
-                Err(e) => {
-                    let _ = stream.shutdown(Shutdown::Both);
-                    return Err(worker_io_error(e));
-                }
-            };
-            stream.write_all(&plaintext)?;
-        }
+        };
+        let payload = build_decrypt_samples_payload(&plaintexts)?;
+        protocol::write_decrypt_frame(
+            &mut stream,
+            &protocol::DecryptFrame {
+                kind: protocol::DECRYPT_KIND_OK,
+                request_id: frame.request_id,
+                payload,
+            },
+        )?;
     }
+}
+
+fn write_decrypt_error(stream: &mut TcpStream, request_id: u32, message: &str) -> io::Result<()> {
+    protocol::write_decrypt_frame(
+        stream,
+        &protocol::DecryptFrame {
+            kind: protocol::DECRYPT_KIND_ERROR,
+            request_id,
+            payload: message.as_bytes().to_vec(),
+        },
+    )
+}
+
+fn parse_decrypt_batch_payload(body: &[u8]) -> io::Result<(String, String, Vec<Vec<u8>>)> {
+    if body.len() < 8 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "decrypt batch too short",
+        ));
+    }
+    let adam_len = u16::from_be_bytes([body[0], body[1]]) as usize;
+    let uri_len = u16::from_be_bytes([body[2], body[3]]) as usize;
+    let sample_count = u32::from_be_bytes([body[4], body[5], body[6], body[7]]) as usize;
+    if adam_len == 0 || uri_len == 0 || sample_count == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "empty decrypt batch field",
+        ));
+    }
+    let table_end =
+        8usize
+            .checked_add(sample_count.checked_mul(4).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "decrypt batch too large")
+            })?)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "decrypt batch too large"))?;
+    let fixed_end = table_end
+        .checked_add(adam_len)
+        .and_then(|n| n.checked_add(uri_len))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "decrypt batch too large"))?;
+    if body.len() < fixed_end {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "truncated decrypt batch header",
+        ));
+    }
+    let mut lengths = Vec::with_capacity(sample_count);
+    for i in 0..sample_count {
+        let off = 8 + i * 4;
+        let len =
+            u32::from_be_bytes([body[off], body[off + 1], body[off + 2], body[off + 3]]) as usize;
+        if len == 0 || len > 64 * 1024 * 1024 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid decrypt sample length",
+            ));
+        }
+        lengths.push(len);
+    }
+    let adam_start = table_end;
+    let uri_start = adam_start + adam_len;
+    let sample_start = uri_start + uri_len;
+    let adam = String::from_utf8(body[adam_start..uri_start].to_vec())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "adam_id is not utf-8"))?;
+    let uri = String::from_utf8(body[uri_start..sample_start].to_vec())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "uri is not utf-8"))?;
+    let mut offset = sample_start;
+    let mut samples = Vec::with_capacity(sample_count);
+    for len in lengths {
+        let end = offset
+            .checked_add(len)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "decrypt batch too large"))?;
+        if end > body.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "truncated decrypt sample",
+            ));
+        }
+        samples.push(body[offset..end].to_vec());
+        offset = end;
+    }
+    if offset != body.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "trailing decrypt batch bytes",
+        ));
+    }
+    Ok((adam, uri, samples))
+}
+
+fn build_decrypt_samples_payload(samples: &[Vec<u8>]) -> io::Result<Vec<u8>> {
+    if samples.len() > u32::MAX as usize {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "too many decrypt samples",
+        ));
+    }
+    let mut size = 4usize
+        .checked_add(samples.len().checked_mul(4).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "decrypt response too large")
+        })?)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "decrypt response too large"))?;
+    for sample in samples {
+        if sample.len() > u32::MAX as usize {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "decrypt sample too large",
+            ));
+        }
+        size = size.checked_add(sample.len()).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "decrypt response too large")
+        })?;
+    }
+    let mut out = Vec::with_capacity(size);
+    out.extend_from_slice(&(samples.len() as u32).to_be_bytes());
+    for sample in samples {
+        out.extend_from_slice(&(sample.len() as u32).to_be_bytes());
+    }
+    for sample in samples {
+        out.extend_from_slice(sample);
+    }
+    Ok(out)
 }
