@@ -150,9 +150,10 @@ runs inside the image. There is no host toolchain prerequisite for the
 default workflow.
 
 For the build to succeed, `rootfs/system/lib64/` must already contain the
-required Apple Music native libraries for your `TARGET_ARCH`. The recommended
-source version is Apple Music for Android **3.6.0-beta**. This repository does
-not provide the download for those files.
+required Apple Music native libraries for your `TARGET_ARCH`. The tested source
+version is Apple Music for Android **3.6.0-beta build 1109**. Provide your own
+legally obtained `.apk` or `.apkm`; this repository does not host, link to, or
+redistribute Apple binaries.
 
 ### Local build
 
