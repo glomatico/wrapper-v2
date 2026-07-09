@@ -2,7 +2,7 @@
 //
 // `Runtime::initialize()` runs the equivalent of upstream main.c's
 // `init()` and `init_ctx()` in one go, then wires SVPlaybackLeaseManager
-// + `SVFootHillSessionCtrl::instance()` for FairPlay decrypt. After it
+// + `SVFootHillSessionCtrl::instance()` for FPS decrypt. After it
 // returns true, the process holds a configured `RequestContext` shared_ptr
 // that downstream Apple-API calls (storefront lookup, m3u8, decrypt) need.
 //
@@ -26,7 +26,7 @@ namespace wrapper::apple {
 // Configuration sourced from environment variables. See
 // .env.example for defaults.
 struct RuntimeConfig {
-    // Filesystem path Apple's libs will use for FairPlay key cache,
+    // Filesystem path Apple's libs will use for the FPS key cache,
     // mpl_db, etc. Mapped to upstream's --base-dir / -B flag.
     std::string base_dir = "/data/data/com.apple.android.music/files";
 
@@ -71,7 +71,7 @@ public:
     // pointer through Apple's callback ABI.
     const Loader* loader() const { return loader_; }
 
-    // FairPlay sample decrypt (TCP decrypt). Requires successful
+    // FPS sample decrypt (TCP decrypt). Requires successful
     // SVPlaybackLeaseManager + SVFootHillSessionCtrl init at startup.
     bool playback_ready() const { return playback_ready_; }
     void* foothill_session() const { return foothill_; }

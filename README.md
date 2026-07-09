@@ -1,19 +1,19 @@
 # wrapper-v2
 
-A clean rewrite of the Apple Music FairPlay decryption wrapper, based on
+A clean rewrite of the Apple Music FPS (FairPlay Streaming) decryption wrapper, based on
 [`WorldObservationLog/wrapper`](https://github.com/WorldObservationLog/wrapper).
 
 ## Development note
 
 This project has been developed with heavy AI assistance. The code should be
 treated as research-grade and reviewed carefully, especially around native ABI
-calls, FairPlay state handling, and experimental endpoints. AI-generated changes
+calls, FPS state handling, and experimental endpoints. AI-generated changes
 are not assumed to be correct just because they compile.
 
 ## What it is
 
 A small daemon that exposes a local HTTP API for account/playback control plus
-a raw TCP port for FairPlay sample decryption, and gives downstream tooling (e.g.
+a raw TCP port for FPS sample decryption, and gives downstream tooling (e.g.
 [`gamdl`](https://github.com/glomatico/gamdl)) a uniform interface that does
 not depend on platform or language.
 
@@ -21,7 +21,7 @@ At runtime `/app/wrapperd` is a host-Linux Rust supervisor. It owns the public
 HTTP port, owns the raw decrypt TCP port, and starts `/app/wrapper`, the small
 host chroot launcher. The launcher execs `/system/bin/main`, an Android/NDK C++
 IPC worker inside the Linux chroot. Only that worker loads Apple Music's Android
-native libraries. If FairPlay hangs, crashes, or returns a CKC/KD-style decrypt
+native libraries. If FPS hangs, crashes, or returns a CKC/KD-style decrypt
 error, the Rust supervisor can discard the worker while keeping the public
 listeners alive.
 
@@ -37,7 +37,7 @@ through HTTP; clients use the raw TCP decrypt protocol on
 
 | Method   | Path         | Description                                                                                                                                                                                                                                                                                                                                                                        |
 | -------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`    | `/health`    | Liveness probe. `{status, version, runtime}` — `runtime.playback_ready` is true when FairPlay decrypt is available.                                                                                                                                                                                                                                                                |
+| `GET`    | `/health`    | Liveness probe. `{status, version, runtime}` — `runtime.playback_ready` is true when FPS decrypt is available.                                                                                                                                                                                                                                                                     |
 | `GET`    | `/me`        | `{version, runtime, auth}` — same runtime flags as `/health`.                                                                                                                                                                                                                                                                                                                      |
 | `POST`   | `/login`     | Body: `{"username": "...", "password": "..."}` or `{"apple_id": "...", "password": "..."}` (synonyms). Drives Apple's `AuthenticateFlow`. Returns `200` + token snapshot, `202` if **2FA** is required (then `POST /login/2fa`), or `401` on failure.                                                                                                                              |
 | `POST`   | `/login/2fa` | Body: `{"code": "123456"}`. Continues a login waiting for HSA2.                                                                                                                                                                                                                                                                                                                    |
@@ -265,9 +265,11 @@ The daemon reads `WRAPPER_*` environment variables (forwarded via
 - `WRAPPER_HOST`, `WRAPPER_PORT` - public HTTP bind address and port.
 - `WRAPPER_DECRYPT_HOST`, `WRAPPER_DECRYPT_PORT` - raw TCP decrypt bind address
   and port. Defaults are `0.0.0.0` and `10020`.
-- `WRAPPER_MODE` - internal C++ worker mode. The Rust supervisor sets
-  `ipc-worker` automatically.
-- `WRAPPER_BASE_DIR` - filesystem dir Apple's libs use for the FairPlay
+- `WRAPPER_MODE` - internal C++ worker mode. Normal users should not set it;
+  the Rust supervisor sets `ipc-worker` automatically.
+- `WRAPPER_WORKER_TIMEOUT_SECS` - timeout for one IPC request to the C++
+  Apple worker. Default is `60`.
+- `WRAPPER_BASE_DIR` - filesystem dir Apple's libs use for the FPS
   key cache and `mpl_db`. The default matches upstream wrapper.
 - `WRAPPER_RESTORE_SESSION` - set to `0` to skip startup token harvest from
   an existing on-disk Apple session (default is restore on).

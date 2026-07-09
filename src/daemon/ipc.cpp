@@ -473,7 +473,7 @@ Frame handle_decrypt_batch(const Frame& req,
     if (!rt.playback_ready()) {
         return json_response(req, 503, json{
             {"error", "decrypt_unavailable"},
-            {"detail", "FairPlay playback stack did not initialize; check /health.runtime"},
+            {"detail", "FPS playback stack did not initialize; check /health.runtime"},
         });
     }
     if (!authenticated_or_restored(account, loader, rt)) {
@@ -500,7 +500,7 @@ Frame handle_decrypt_batch(const Frame& req,
     if (!dr.ok || dr.plaintexts.size() != expected_count) {
         return json_response(req, 502, json{
             {"error", "decrypt_failed"},
-            {"detail", dr.error.empty() ? "FairPlay decrypt failed" : dr.error},
+            {"detail", dr.error.empty() ? "FPS decrypt failed" : dr.error},
         }, true, true);
     }
     return binary_response(req, build_decrypt_response_payload(dr.plaintexts));
