@@ -100,8 +100,6 @@ DecryptResult decrypt_samples(const Loader& loader,
         }
 
         if (kd == nullptr) {
-            std::fprintf(stderr, "decrypt: getPersistentKey adam=%s samples=%zu\n",
-                         adam_id.c_str(), chunks.size());
             auto        default_id = abi::make_string_view(adam_id.c_str());
             auto        uri        = abi::make_string_view(key_uri.c_str());
             auto        key_format = abi::make_string_view("com.apple.streamingkeydelivery");
@@ -122,7 +120,6 @@ DecryptResult decrypt_samples(const Loader& loader,
                 return attempt;
             }
 
-            std::fprintf(stderr, "decrypt: decryptContext adam=%s\n", adam_id.c_str());
             abi::shared_ptr sv_ctx{};
             aarch64_sret::svfoot_decrypt_context(&sv_ctx, fh, persist.obj,
                                                 s.SVFootHillSessionCtrl_decryptContext);
@@ -158,7 +155,6 @@ DecryptResult decrypt_samples(const Loader& loader,
         }
 
         attempt.plaintexts.reserve(chunks.size());
-        std::fprintf(stderr, "decrypt: fp_sample_decrypt samples=%zu\n", chunks.size());
         for (auto& chunk : chunks) {
             if (chunk.empty()) {
                 *error = "empty sample";

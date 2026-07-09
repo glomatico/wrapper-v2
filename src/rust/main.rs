@@ -354,6 +354,11 @@ fn handle_decrypt_client(mut stream: TcpStream, worker: Arc<Worker>) -> io::Resu
     stream.set_nodelay(true)?;
     stream.set_read_timeout(Some(Duration::from_secs(60)))?;
     stream.set_write_timeout(Some(Duration::from_secs(60)))?;
+    let peer = stream
+        .peer_addr()
+        .map(|addr| addr.to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    let mut logged_session = false;
     loop {
         let frame = match protocol::read_decrypt_frame(&mut stream) {
             Ok(frame) => frame,
@@ -378,6 +383,13 @@ fn handle_decrypt_client(mut stream: TcpStream, worker: Arc<Worker>) -> io::Resu
                 return Ok(());
             }
         };
+        if !logged_session {
+            eprintln!(
+                "wrapperd: decrypt client {peer} adam={} fps_key_uri={}",
+                adam, uri
+            );
+            logged_session = true;
+        }
         let plaintexts = match worker.decrypt_batch(&adam, &uri, samples) {
             Ok(p) => p,
             Err(e) => {
