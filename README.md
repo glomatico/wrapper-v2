@@ -194,10 +194,19 @@ curl http://127.0.0.1/health
 curl http://127.0.0.1/me
 ```
 
-#### 5. Sign in
+The daemon binds HTTP port 80 and TCP decrypt port 10020 inside the container.
+Override with `HTTP_PORT=8080` or `DECRYPT_PORT=11020` when those host ports are
+already in use.
 
-Use your real Apple ID. If the first request returns `202`, continue with the
-2FA request.
+### Optional sign in
+
+You do not need to sign in manually as part of the local build. Downstream tools
+such as [`gamdl`](https://github.com/glomatico/gamdl) can ask for credentials
+automatically and call `/login` / `/login/2fa` when they need an authenticated
+Apple Music session.
+
+For manual testing, use your real Apple ID. If the first request returns `202`,
+continue with the 2FA request.
 
 ```bash
 curl -X POST http://127.0.0.1/login \
@@ -217,10 +226,6 @@ Check the current session or clear the in-memory login state:
 curl http://127.0.0.1/me
 curl -X DELETE http://127.0.0.1/login
 ```
-
-The daemon binds HTTP port 80 and TCP decrypt port 10020 inside the container.
-Override with `HTTP_PORT=8080` or `DECRYPT_PORT=11020` when those host ports are
-already in use.
 
 ### arm64-v8a image (Apple Silicon / AArch64 Linux)
 
