@@ -52,7 +52,7 @@
 
 namespace {
 
-constexpr const char* kVersion        = "0.0.1";
+constexpr const char* kVersion        = "0.0.2";
 
 enum class ProgramMode {
     IpcWorker,

@@ -12,7 +12,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use worker::{Worker, WorkerError};
 
-const VERSION: &str = "0.0.1";
+const VERSION: &str = "0.0.2";
 const DEFAULT_HTTP_HOST: &str = "0.0.0.0";
 const DEFAULT_HTTP_PORT: u16 = 80;
 const DEFAULT_DECRYPT_HOST: &str = "0.0.0.0";
