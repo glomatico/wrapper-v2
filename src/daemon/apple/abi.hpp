@@ -22,7 +22,7 @@
 // and update LIBS_VERSION.json.
 //
 // The declarations cover runtime init, auth/token harvest, playback dispatch,
-// and FairPlay sample decrypt symbols.
+// and FPS sample decrypt symbols.
 
 #pragma once
 
@@ -401,7 +401,7 @@ using fn_RequestContext_storeFrontIdentifier =
     void (*)(std_string* out, void* this_, shared_ptr* url_bag);
 
 // ---------------------------------------------------------------------------
-// SVPlaybackLeaseManager + SVFootHillSessionCtrl (FairPlay decrypt)
+// SVPlaybackLeaseManager + SVFootHillSessionCtrl (FPS decrypt)
 // ---------------------------------------------------------------------------
 
 // SVPlaybackLeaseManager::SVPlaybackLeaseManager(
@@ -650,7 +650,7 @@ inline constexpr const char* URLResponse_protocolDictionary =
 inline constexpr const char* RequestContext_storeFrontIdentifier =
     "_ZNK17storeservicescore14RequestContext20storeFrontIdentifierERKNSt6__ndk110shared_ptrINS_6URLBagEEE";
 
-// ---- FairPlay decrypt / lease ----
+// ---- FPS decrypt / lease ----
 
 inline constexpr const char* SVPlaybackLeaseManager_ctor =
     "_ZN22SVPlaybackLeaseManagerC2ERKNSt6__ndk18functionIFvRKiEEERKNS1_IFvRKNS0_10shared_ptrIN17storeservicescore19StoreErrorConditionEEEEEE";

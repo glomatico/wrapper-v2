@@ -1,14 +1,14 @@
 // Apple Music native-library loader.
 //
 // `Loader::open()` dlopens Apple's JNI stack (mediaplatform, storeservicescore,
-// androidappmusic) and optional FairPlay helpers (CoreFP / CoreLSKD), then
+// androidappmusic) and optional FPS helpers (Apple CoreFP / CoreLSKD), then
 // resolves mangled symbols into `Symbols`.
 //
 // The daemon ELF itself has *no* DT_NEEDED reference to Apple's libs -
 // this is what lets us start the daemon in stub mode even when the libs
-// have not been staged. If core libs are missing or a non-FairPlay
-// symbol fails to resolve, `open()` returns false. FairPlay-only symbols
-// may fail separately; see `fairplay_decrypt_available()`.
+// have not been staged. If core libs are missing or a non-FPS
+// symbol fails to resolve, `open()` returns false. FPS-only symbols
+// may fail separately; see `fps_decrypt_available()`.
 
 #pragma once
 
@@ -19,8 +19,8 @@
 namespace wrapper::apple {
 
 // Function-pointer table populated by Loader::open(). Core auth/token
-// fields are non-null after ok()==true. FairPlay decrypt pointers (lease,
-// FootHill, fp_sample_decrypt) are set only when fairplay_decrypt_available()
+// fields are non-null after ok()==true. FPS decrypt pointers (lease,
+// FootHill, fp_sample_decrypt) are set only when fps_decrypt_available()
 // is true; otherwise they may be null even if ok().
 struct Symbols {
     // Vtables for std::__shared_ptr_emplace<T, ...>. Stored as `void**`
@@ -183,7 +183,7 @@ struct Symbols {
 
     abi::fn_RequestContext_storeFrontIdentifier RequestContext_storeFrontIdentifier = nullptr;
 
-    // ---- FairPlay decrypt ----
+    // ---- FPS decrypt ----
     abi::fn_SVPlaybackLeaseManager_ctor                      SVPlaybackLeaseManager_ctor                      = nullptr;
     abi::fn_SVPlaybackLeaseManager_refreshLeaseAutomatically SVPlaybackLeaseManager_refreshLeaseAutomatically = nullptr;
     abi::fn_SVPlaybackLeaseManager_requestLease              SVPlaybackLeaseManager_requestLease              = nullptr;
@@ -214,8 +214,8 @@ public:
 
     bool ok() const { return ok_; }
 
-    // True when FairPlay decrypt dlsyms all succeeded (lease + FootHill + sample op).
-    bool fairplay_decrypt_available() const { return fairplay_decrypt_available_; }
+    // True when FPS decrypt dlsyms all succeeded (lease + FootHill + sample op).
+    bool fps_decrypt_available() const { return fps_decrypt_available_; }
 
     const Symbols& sym() const { return symbols_; }
 
@@ -244,7 +244,7 @@ private:
 
     Symbols     symbols_;
     bool        ok_{false};
-    bool        fairplay_decrypt_available_{false};
+    bool        fps_decrypt_available_{false};
     std::string last_error_;
 
     void* foot_hill_persistent_key_fn_   = nullptr;

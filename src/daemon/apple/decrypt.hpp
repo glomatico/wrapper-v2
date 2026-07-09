@@ -1,4 +1,4 @@
-// FairPlay FPS sample decryption (POST /decrypt). Mirrors upstream
+// FPS sample decryption (TCP decrypt). Mirrors upstream
 // wrapper main.c:getKdContext + NfcRKVnxuKZy04KWbdFu71Ou.
 
 #pragma once

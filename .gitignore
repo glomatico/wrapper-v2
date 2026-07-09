@@ -1,31 +1,12 @@
-# Build outputs
-/build/
-/build-*/
-/cmake-build-*/
+/target/
 
-# Runtime mount for docker compose
+# Runtime/session data mounted by compose.yaml.
 /data/
 
-# Local rootfs overlay (IANA DB is vendored under vendor/android-system/…/zoneinfo)
-/rootfs/
-
-# Final binaries at repo root (produced by build)
-/wrapper
-/main
-
-# Tooling caches and APK staging
-/.tmp/
-/.temp/.login-response.json
-/.cache/
-*.apk
-*.apkm
-
-# Editor / IDE
-.vscode/
-.idea/
-*.swp
-*~
-
-# OS
-.DS_Store
-Thumbs.db
+# Generated chroot contents. Keep placeholders tracked, but do not commit
+# staged Android system files or extracted Apple Music libraries.
+/rootfs/system/bin/*
+!/rootfs/system/bin/.gitkeep
+/rootfs/system/lib64/*
+!/rootfs/system/lib64/.gitkeep
+/rootfs/system/usr/

@@ -13,16 +13,6 @@ include(FetchContent)
 # -----------------------------------------------------------------------------
 # Third-party deps
 # -----------------------------------------------------------------------------
-# cpp-httplib: header-only HTTP/1.1 server. MIT license.
-FetchContent_Declare(
-    httplib
-    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG        v0.18.5
-    GIT_SHALLOW    TRUE
-)
-set(HTTPLIB_COMPILE OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(httplib)
-
 # nlohmann::json: JSON parser/serializer. MIT license.
 FetchContent_Declare(
     nlohmann_json
@@ -39,8 +29,7 @@ FetchContent_MakeAvailable(nlohmann_json)
 # -----------------------------------------------------------------------------
 add_executable(main
     main.cpp
-    server.cpp
-    supervisor.cpp
+    ipc.cpp
     apple/auth.cpp
     apple/decrypt.cpp
     apple/loader.cpp
@@ -54,7 +43,6 @@ target_include_directories(main PRIVATE
 )
 
 target_link_libraries(main PRIVATE
-    httplib::httplib
     nlohmann_json::nlohmann_json
 )
 
@@ -63,10 +51,8 @@ target_compile_options(main PRIVATE
     -fexceptions
 )
 
-# RTTI is intentionally on. nlohmann::json compiles fine with or
-# without it but cpp-httplib's exception path uses typeid lookups,
-# and we share libc++_shared.so with Apple's libs which were also
-# built with RTTI. Disabling here would split the runtime.
+# RTTI is intentionally on. We share libc++_shared.so with Apple's libs which
+# were also built with RTTI. Disabling here would split the runtime.
 
 # Our vendored `linker64` is from an older Android build that requires
 # DT_HASH and does not understand GNU-hash-only executables. NDK r23b's

@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <utility>
 
-#include "apple/fairplay_cert.inc"
+#include "apple/fps_cert.inc"
 #include "apple/aarch64_sret_thunks.hpp"
 #include "apple/loader.hpp"
 #include "apple/runtime.hpp"
@@ -64,8 +64,8 @@ DecryptResult decrypt_samples(const Loader& loader,
                               std::string   key_uri,
                               std::vector<std::vector<std::uint8_t>> ciphertexts) {
     DecryptResult out;
-    if (!loader.ok() || !loader.fairplay_decrypt_available()) {
-        out.error = "FairPlay decrypt chain not loaded";
+    if (!loader.ok() || !loader.fps_decrypt_available()) {
+        out.error = "FPS decrypt chain not loaded";
         return out;
     }
     if (!runtime.playback_ready()) {
@@ -100,8 +100,6 @@ DecryptResult decrypt_samples(const Loader& loader,
         }
 
         if (kd == nullptr) {
-            std::fprintf(stderr, "decrypt: getPersistentKey adam=%s samples=%zu\n",
-                         adam_id.c_str(), chunks.size());
             auto        default_id = abi::make_string_view(adam_id.c_str());
             auto        uri        = abi::make_string_view(key_uri.c_str());
             auto        key_format = abi::make_string_view("com.apple.streamingkeydelivery");
@@ -109,7 +107,7 @@ DecryptResult decrypt_samples(const Loader& loader,
             auto        server_uri =
                 abi::make_string_view("https://play.itunes.apple.com/WebObjects/MZPlay.woa/music/fps");
             auto        protocol   = abi::make_string_view("simplified");
-            auto        fps_cert   = abi::make_string_view(kFairPlayCert);
+            auto        fps_cert   = abi::make_string_view(kFpsCert);
 
             abi::shared_ptr persist{};
             loader.foot_hill_get_persistent_key(
@@ -122,7 +120,6 @@ DecryptResult decrypt_samples(const Loader& loader,
                 return attempt;
             }
 
-            std::fprintf(stderr, "decrypt: decryptContext adam=%s\n", adam_id.c_str());
             abi::shared_ptr sv_ctx{};
             aarch64_sret::svfoot_decrypt_context(&sv_ctx, fh, persist.obj,
                                                 s.SVFootHillSessionCtrl_decryptContext);
@@ -158,7 +155,6 @@ DecryptResult decrypt_samples(const Loader& loader,
         }
 
         attempt.plaintexts.reserve(chunks.size());
-        std::fprintf(stderr, "decrypt: fp_sample_decrypt samples=%zu\n", chunks.size());
         for (auto& chunk : chunks) {
             if (chunk.empty()) {
                 *error = "empty sample";
@@ -167,7 +163,7 @@ DecryptResult decrypt_samples(const Loader& loader,
             }
             const long status = s.fp_sample_decrypt(kd, 5u, chunk.data(), chunk.data(), chunk.size());
             if (status < 0) {
-                *error = "FairPlay sample decrypt failed status=" + std::to_string(status);
+                *error = "FPS sample decrypt failed status=" + std::to_string(status);
                 std::fprintf(stderr, "decrypt: fp_sample_decrypt failed status=%ld\n", status);
                 attempt.plaintexts.clear();
                 return attempt;
@@ -185,12 +181,12 @@ DecryptResult decrypt_samples(const Loader& loader,
     } catch (const std::exception& e) {
         first_error = e.what();
     } catch (...) {
-        first_error = "native FairPlay decrypt threw an unknown exception";
+        first_error = "native FPS decrypt threw an unknown exception";
     }
     if (out.ok) return out;
 
     erase_cached_kd(adam_id, key_uri);
-    out.error = "FairPlay decrypt failed";
+    out.error = "FPS decrypt failed";
     if (!first_error.empty()) out.error += " (first: " + first_error + ")";
     return out;
 }

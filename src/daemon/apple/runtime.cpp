@@ -6,7 +6,7 @@
 //     when the title is "Sign In" (same as upstream), and always calls
 //     handleProtocolDialogResponse so AuthenticateFlow does not stall.
 //   - We install SVPlaybackLeaseManager + requestLease before exposing
-//     POST /decrypt, matching upstream main() after init_ctx.
+//     TCP decrypt, matching upstream main() after init_ctx.
 //   - Errors during init log to stderr; credential + ProtocolDialog
 //     callbacks log a single line each to stderr (no secrets).
 //
@@ -301,16 +301,16 @@ bool Runtime::initialize(const Loader& loader, const RuntimeConfig& cfg) {
     device_info_ = cfg.device_info;
     loader_      = &loader;
 
-    if (!loader.fairplay_decrypt_available()) {
+    if (!loader.fps_decrypt_available()) {
         playback_ready_ = false;
         std::fprintf(stderr,
-                     "runtime: FairPlay decrypt chain not loaded; POST /decrypt unavailable\n");
+                     "runtime: FPS decrypt chain not loaded; TCP decrypt unavailable\n");
     } else {
         playback_ready_ = init_playback_session(s);
         if (!playback_ready_) {
             std::fprintf(stderr,
-                         "runtime: warning: FairPlay playback init failed; "
-                         "POST /decrypt unavailable\n");
+                         "runtime: warning: FPS playback init failed; "
+                        "TCP decrypt unavailable\n");
         }
     }
 
@@ -430,9 +430,9 @@ bool Runtime::init_request_context(const Symbols& s,
     aarch64_sret::request_context_init(&rci_ret, request_ctx_.obj, &rcc,
                                        s.RequestContext_init);
 
-    auto fp_dir = abi::make_string_view(cfg.base_dir.c_str());
+    auto fps_dir = abi::make_string_view(cfg.base_dir.c_str());
     trace("init_request_context: setFairPlayDirectoryPath");
-    s.RequestContext_setFairPlayDirectoryPath(request_ctx_.obj, &fp_dir);
+    s.RequestContext_setFairPlayDirectoryPath(request_ctx_.obj, &fps_dir);
 
     trace("init_request_context: done");
     return true;

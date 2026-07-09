@@ -103,7 +103,7 @@ bool resolve_vtable(const char* name, void*** out, std::string* err_out) {
     return true;
 }
 
-void clear_fairplay_symbols(Symbols* s) {
+void clear_fps_symbols(Symbols* s) {
     s->SVPlaybackLeaseManager_ctor                      = nullptr;
     s->SVPlaybackLeaseManager_refreshLeaseAutomatically = nullptr;
     s->SVPlaybackLeaseManager_requestLease              = nullptr;
@@ -127,7 +127,7 @@ bool Loader::open(const std::string& libs_dir) {
 
     // libc++_shared.so is already a DT_NEEDED of the daemon; do not dlopen.
     //
-    // Pre-load FairPlay helpers first so SVFootHill symbols resolve (some
+    // Pre-load FPS helpers first so SVFootHill symbols resolve (some
     // builds only export the chain once CoreFP/CoreLSKD are in the process).
     trace("dlopen libCoreFP.so (optional)");
     h_libcorefp_   = open_lib_optional(libs_dir + "/libCoreFP.so");
@@ -332,12 +332,12 @@ bool Loader::open(const std::string& libs_dir) {
 
 #undef RESOLVE_CF
 
-    clear_fairplay_symbols(&symbols_);
-    std::string fp_err;
+    clear_fps_symbols(&symbols_);
+    std::string fps_err;
     // Match zhaarey/apple-music-downloader agent.js: FootHill + lease symbols are
     // resolved from libandroidappmusic.so exports. Try that handle first, then
     // RTLD_DEFAULT (bionic/global lookup can miss symbols visible via the DSO).
-    auto resolve_fp = [&](const char* mangled_name, auto* out_slot) -> bool {
+    auto resolve_fps = [&](const char* mangled_name, auto* out_slot) -> bool {
         void* const handles[] = {
             h_libandroidappmusic_,
             h_libmediaplatform_,
@@ -345,63 +345,63 @@ bool Loader::open(const std::string& libs_dir) {
             nullptr,
         };
         for (int i = 0; handles[i] != nullptr; ++i) {
-            if (resolve(handles[i], mangled_name, out_slot, &fp_err)) return true;
+            if (resolve(handles[i], mangled_name, out_slot, &fps_err)) return true;
         }
-        return resolve(RTLD_DEFAULT, mangled_name, out_slot, &fp_err);
+        return resolve(RTLD_DEFAULT, mangled_name, out_slot, &fps_err);
     };
-#define RESOLVE_FP(field, name) fp_ok &= resolve_fp(mangled::name, &symbols_.field)
+#define RESOLVE_FPS(field, name) resolve_fps(mangled::name, &symbols_.field)
 
-    bool fp_ok = true;
-    fp_ok &= RESOLVE_FP(SVPlaybackLeaseManager_ctor, SVPlaybackLeaseManager_ctor);
-    fp_ok &= RESOLVE_FP(SVPlaybackLeaseManager_refreshLeaseAutomatically,
+    bool fps_ok = true;
+    fps_ok &= RESOLVE_FPS(SVPlaybackLeaseManager_ctor, SVPlaybackLeaseManager_ctor);
+    fps_ok &= RESOLVE_FPS(SVPlaybackLeaseManager_refreshLeaseAutomatically,
                         SVPlaybackLeaseManager_refreshLeaseAutomatically);
-    fp_ok &= RESOLVE_FP(SVPlaybackLeaseManager_requestLease, SVPlaybackLeaseManager_requestLease);
-    fp_ok &= RESOLVE_FP(SVFootHillSessionCtrl_instance, SVFootHillSessionCtrl_instance);
+    fps_ok &= RESOLVE_FPS(SVPlaybackLeaseManager_requestLease, SVPlaybackLeaseManager_requestLease);
+    fps_ok &= RESOLVE_FPS(SVFootHillSessionCtrl_instance, SVFootHillSessionCtrl_instance);
     foot_hill_persistent_key_fn_   = nullptr;
     foot_hill_persistent_key_abi8_ = false;
     {
         abi::fn_SVFootHillSessionCtrl_getPersistentKey  pk8 = nullptr;
         abi::fn_SVFootHillSessionCtrl_getPersistentKey7 pk7 = nullptr;
         bool                                              pk  = false;
-        if (resolve_fp(mangled::SVFootHillSessionCtrl_getPersistentKey_8str, &pk8)) {
+        if (resolve_fps(mangled::SVFootHillSessionCtrl_getPersistentKey_8str, &pk8)) {
             foot_hill_persistent_key_fn_   = reinterpret_cast<void*>(pk8);
             foot_hill_persistent_key_abi8_ = true;
             pk                             = true;
-        } else if (resolve_fp(mangled::SVFootHillSessionCtrl_getPersistentKey_7str, &pk7)) {
+        } else if (resolve_fps(mangled::SVFootHillSessionCtrl_getPersistentKey_7str, &pk7)) {
             foot_hill_persistent_key_fn_   = reinterpret_cast<void*>(pk7);
             foot_hill_persistent_key_abi8_ = false;
             pk                             = true;
         }
-        fp_ok &= pk;
+        fps_ok &= pk;
     }
-    fp_ok &= RESOLVE_FP(SVFootHillSessionCtrl_decryptContext,
+    fps_ok &= RESOLVE_FPS(SVFootHillSessionCtrl_decryptContext,
                         SVFootHillSessionCtrl_decryptContext);
-    fp_ok &= RESOLVE_FP(SVFootHillPContext_kdContext, SVFootHillPContext_kdContext);
-    fp_ok &= RESOLVE_FP(fp_sample_decrypt, fp_sample_decrypt);
-    fp_ok &= RESOLVE_FP(SVFootHillSessionCtrl_resetAllContexts,
+    fps_ok &= RESOLVE_FPS(SVFootHillPContext_kdContext, SVFootHillPContext_kdContext);
+    fps_ok &= RESOLVE_FPS(fp_sample_decrypt, fp_sample_decrypt);
+    fps_ok &= RESOLVE_FPS(SVFootHillSessionCtrl_resetAllContexts,
                         SVFootHillSessionCtrl_resetAllContexts);
-    fp_ok &= RESOLVE_FP(shared_ptr_SVFootHillPContext_dtor,
+    fps_ok &= RESOLVE_FPS(shared_ptr_SVFootHillPContext_dtor,
                         shared_ptr_SVFootHillPContext_dtor);
 
-#undef RESOLVE_FP
+#undef RESOLVE_FPS
 
     if (foot_hill_persistent_key_fn_ != nullptr) {
         trace(foot_hill_persistent_key_abi8_
-                  ? "FairPlay getPersistentKey ABI=8-string"
-                  : "FairPlay getPersistentKey ABI=7-string");
+                  ? "FPS getPersistentKey ABI=8-string"
+                  : "FPS getPersistentKey ABI=7-string");
     }
 
-    if (!fp_ok) {
-        clear_fairplay_symbols(&symbols_);
+    if (!fps_ok) {
+        clear_fps_symbols(&symbols_);
         foot_hill_persistent_key_fn_   = nullptr;
         foot_hill_persistent_key_abi8_ = false;
-        fairplay_decrypt_available_ = false;
+        fps_decrypt_available_ = false;
         std::fprintf(stderr,
-                     "loader: FairPlay decrypt symbols unavailable (%s); "
-                     "POST /decrypt disabled\n",
-                     fp_err.c_str());
+                     "loader: FPS decrypt symbols unavailable (%s); "
+                     "TCP decrypt disabled\n",
+                     fps_err.c_str());
     } else {
-        fairplay_decrypt_available_ = true;
+        fps_decrypt_available_ = true;
     }
 
     ok_ = true;
@@ -411,7 +411,7 @@ bool Loader::open(const std::string& libs_dir) {
 
 void Loader::close() {
     ok_                       = false;
-    fairplay_decrypt_available_ = false;
+    fps_decrypt_available_ = false;
     symbols_                  = Symbols{};
     foot_hill_persistent_key_fn_   = nullptr;
     foot_hill_persistent_key_abi8_ = false;
