@@ -143,9 +143,18 @@ fn handle_http_connection(mut stream: TcpStream, worker: Arc<Worker>) -> io::Res
 
     match (method.as_str(), path.as_str()) {
         ("GET", "/health") => {
-            let worker_status = match worker.health() {
-                Ok(r) => json!({"reachable": true, "status": r.http_status}),
-                Err(e) => json!({"reachable": false, "status": 0, "error": e.to_string()}),
+            let params = parse_query(&query);
+            let deep = params
+                .get("deep")
+                .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+                .unwrap_or(false);
+            let worker_ipc = if deep {
+                Some(match worker.health() {
+                    Ok(r) => json!({"reachable": true, "status": r.http_status}),
+                    Err(e) => json!({"reachable": false, "status": 0, "error": e.to_string()}),
+                })
+            } else {
+                None
             };
             write_json(
                 &mut stream,
@@ -154,7 +163,8 @@ fn handle_http_connection(mut stream: TcpStream, worker: Arc<Worker>) -> io::Res
                     "status": "ok",
                     "version": VERSION,
                     "mode": "rust-supervisor",
-                    "worker": worker_status,
+                    "worker": worker.snapshot(),
+                    "worker_ipc": worker_ipc,
                 }),
             )?;
         }

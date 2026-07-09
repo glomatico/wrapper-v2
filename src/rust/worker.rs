@@ -46,7 +46,33 @@ pub struct Worker {
     version: String,
     request_timeout: Duration,
     next_id: AtomicU32,
+    restart_count: AtomicU32,
+    timeout_count: AtomicU32,
+    waiting_count: AtomicU32,
     proc: Mutex<Option<WorkerProcess>>,
+    state: Mutex<WorkerState>,
+}
+
+struct WorkerState {
+    current: Option<CurrentRequest>,
+    last_error: Option<String>,
+    last_restart_reason: Option<String>,
+}
+
+#[derive(Clone)]
+struct CurrentRequest {
+    id: u32,
+    opcode: u16,
+    started: Instant,
+}
+
+struct RequestTracker<'a> {
+    worker: &'a Worker,
+    id: u32,
+}
+
+struct WaitTracker<'a> {
+    worker: &'a Worker,
 }
 
 impl Worker {
@@ -56,7 +82,15 @@ impl Worker {
             version,
             request_timeout: worker_timeout(),
             next_id: AtomicU32::new(1),
+            restart_count: AtomicU32::new(0),
+            timeout_count: AtomicU32::new(0),
+            waiting_count: AtomicU32::new(0),
             proc: Mutex::new(None),
+            state: Mutex::new(WorkerState {
+                current: None,
+                last_error: None,
+                last_restart_reason: None,
+            }),
         }
     }
 
@@ -76,6 +110,34 @@ impl Worker {
 
     pub fn health(&self) -> Result<WorkerResponse, WorkerError> {
         self.request_json(protocol::OP_HEALTH, Value::Null)
+    }
+
+    pub fn snapshot(&self) -> Value {
+        let current = self.state.lock().ok().and_then(|s| s.current.clone());
+        let (last_error, last_restart_reason) = self
+            .state
+            .lock()
+            .map(|s| (s.last_error.clone(), s.last_restart_reason.clone()))
+            .unwrap_or((None, None));
+        let pid = self
+            .proc
+            .try_lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|p| p.child.id()));
+        json!({
+            "pid": pid,
+            "request_timeout_secs": self.request_timeout.as_secs(),
+            "restart_count": self.restart_count.load(Ordering::Relaxed),
+            "timeout_count": self.timeout_count.load(Ordering::Relaxed),
+            "waiting_count": self.waiting_count.load(Ordering::Relaxed),
+            "current_request": current.map(|r| json!({
+                "id": r.id,
+                "opcode": r.opcode,
+                "elapsed_ms": r.started.elapsed().as_millis(),
+            })),
+            "last_error": last_error,
+            "last_restart_reason": last_restart_reason,
+        })
     }
 
     pub fn request_json(&self, opcode: u16, payload: Value) -> Result<WorkerResponse, WorkerError> {
@@ -113,7 +175,23 @@ impl Worker {
     fn request(&self, opcode: u16, payload: Vec<u8>) -> Result<protocol::Frame, WorkerError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let deadline = Instant::now() + self.request_timeout;
-        let mut guard = lock_worker_timeout(&self.proc, deadline)?;
+        let wait_tracker = self.track_wait();
+        let mut guard = match lock_worker_timeout(&self.proc, deadline) {
+            Ok(g) => g,
+            Err(e) => {
+                if e.to_string().contains("timed out") {
+                    eprintln!(
+                        "wrapperd: worker request opcode={opcode} timed out waiting for worker after {:?}",
+                        self.request_timeout
+                    );
+                    self.timeout_count.fetch_add(1, Ordering::Relaxed);
+                }
+                self.record_error(e.to_string());
+                return Err(e);
+            }
+        };
+        drop(wait_tracker);
+        let _tracker = self.track_request(id, opcode);
         if guard.is_none() {
             *guard = Some(self.spawn()?);
         }
@@ -139,9 +217,12 @@ impl Worker {
                     "wrapperd: worker request opcode={opcode} timed out while writing after {:?}; restarting worker",
                     self.request_timeout
                 );
-                kill_worker(proc);
+                self.timeout_count.fetch_add(1, Ordering::Relaxed);
+                self.abandon_locked_worker(&mut guard, "write timeout");
+            } else {
+                self.abandon_locked_worker(&mut guard, "ipc write error");
             }
-            *guard = None;
+            self.record_error(e.to_string());
             return Err(WorkerError::Io(e.to_string()));
         }
         let resp = match read_frame_timeout(&mut proc.stdout, deadline) {
@@ -152,15 +233,18 @@ impl Worker {
                         "wrapperd: worker request opcode={opcode} timed out after {:?}; restarting worker",
                         self.request_timeout
                     );
-                    kill_worker(proc);
+                    self.timeout_count.fetch_add(1, Ordering::Relaxed);
+                    self.abandon_locked_worker(&mut guard, "response timeout");
+                } else {
+                    self.abandon_locked_worker(&mut guard, "ipc read error");
                 }
-                *guard = None;
+                self.record_error(e.to_string());
                 return Err(WorkerError::Io(e.to_string()));
             }
         };
         if resp.kind != protocol::KIND_RESPONSE || resp.request_id != id || resp.opcode != opcode {
-            kill_worker(proc);
-            *guard = None;
+            self.abandon_locked_worker(&mut guard, "mismatched ipc response");
+            self.record_error("mismatched ipc response");
             return Err(WorkerError::Protocol("mismatched ipc response".to_string()));
         }
         Ok(resp)
@@ -192,18 +276,81 @@ impl Worker {
     }
 
     fn restart_after_delay(&self) {
+        let old = {
+            let mut guard = match self.proc.lock() {
+                Ok(g) => g,
+                Err(_) => return,
+            };
+            guard.take()
+        };
+        cleanup_worker(old, "restart requested by worker response");
+        self.record_restart("restart requested by worker response");
+        thread::sleep(Duration::from_secs(1));
         let mut guard = match self.proc.lock() {
             Ok(g) => g,
             Err(_) => return,
         };
-        if let Some(mut p) = guard.take() {
-            let _ = p.child.kill();
-            let _ = p.child.wait();
+        if guard.is_some() {
+            return;
         }
-        thread::sleep(Duration::from_secs(1));
         match self.spawn() {
             Ok(p) => *guard = Some(p),
             Err(e) => eprintln!("wrapperd: worker restart failed: {e}"),
+        }
+    }
+
+    fn track_wait(&self) -> WaitTracker<'_> {
+        self.waiting_count.fetch_add(1, Ordering::Relaxed);
+        WaitTracker { worker: self }
+    }
+
+    fn track_request(&self, id: u32, opcode: u16) -> RequestTracker<'_> {
+        if let Ok(mut state) = self.state.lock() {
+            state.current = Some(CurrentRequest {
+                id,
+                opcode,
+                started: Instant::now(),
+            });
+        }
+        RequestTracker { worker: self, id }
+    }
+
+    fn record_error(&self, error: impl Into<String>) {
+        if let Ok(mut state) = self.state.lock() {
+            state.last_error = Some(error.into());
+        }
+    }
+
+    fn record_restart(&self, reason: impl Into<String>) {
+        self.restart_count.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut state) = self.state.lock() {
+            state.last_restart_reason = Some(reason.into());
+        }
+    }
+
+    fn abandon_locked_worker(
+        &self,
+        guard: &mut MutexGuard<'_, Option<WorkerProcess>>,
+        reason: &'static str,
+    ) {
+        let old = guard.take();
+        cleanup_worker(old, reason);
+        self.record_restart(reason);
+    }
+}
+
+impl Drop for WaitTracker<'_> {
+    fn drop(&mut self) {
+        self.worker.waiting_count.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+impl Drop for RequestTracker<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.worker.state.lock() {
+            if state.current.as_ref().map(|r| r.id) == Some(self.id) {
+                state.current = None;
+            }
         }
     }
 }
@@ -245,9 +392,14 @@ fn lock_worker_timeout(
     }
 }
 
-fn kill_worker(proc: &mut WorkerProcess) {
-    let _ = proc.child.kill();
-    let _ = proc.child.wait();
+fn cleanup_worker(proc: Option<WorkerProcess>, reason: &'static str) {
+    if let Some(mut proc) = proc {
+        thread::spawn(move || {
+            eprintln!("wrapperd: cleaning up old worker: {reason}");
+            let _ = proc.child.kill();
+            let _ = proc.child.wait();
+        });
+    }
 }
 
 fn write_frame_timeout(
