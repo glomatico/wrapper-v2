@@ -1,1 +1,12 @@
 /target/
+
+# Runtime/session data mounted by compose.yaml.
+/data/
+
+# Generated chroot contents. Keep placeholders tracked, but do not commit
+# staged Android system files or extracted Apple Music libraries.
+/rootfs/system/bin/*
+!/rootfs/system/bin/.gitkeep
+/rootfs/system/lib64/*
+!/rootfs/system/lib64/.gitkeep
+/rootfs/system/usr/
