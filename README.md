@@ -305,6 +305,8 @@ test, with one repository secret:
 **Matrix:** both `x86_64` and `arm64-v8a` jobs use `ubuntu-latest`. The arm64 image is
 `linux/arm64` at runtime; QEMU is enabled before the smoke `docker run` so the job works
 on amd64 GitHub runners. The compile stage stays **linux/amd64** for the official NDK ZIP.
+The job also runs `cargo test`, validates `compose.yaml`, and checks that the
+TCP decrypt listener accepts connections.
 
 Pull requests opened from forks skip the build job because they cannot read the
 secret.

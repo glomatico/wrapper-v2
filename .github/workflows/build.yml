@@ -50,6 +50,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             jq unzip curl ca-certificates
 
+      - name: Validate Compose config
+        run: docker compose config --quiet
+
+      - name: Rust unit tests
+        run: cargo test
+
       - name: Make scripts executable
         run: chmod +x tools/extract-libs.sh tools/stage-system.sh
 
@@ -90,7 +96,7 @@ jobs:
             -t wrapper-v2:${{ github.sha }} \
             .
 
-      - name: Smoke test (/health)
+      - name: Smoke test (HTTP and TCP)
         run: |
           # No --rm: if the app exits immediately, Docker removes --rm containers
           # and a later docker stop hits "No such container".
@@ -103,21 +109,38 @@ jobs:
             --cap-add SYS_ADMIN --cap-add SYS_CHROOT --cap-add SYS_PTRACE \
             --security-opt apparmor=unconfined \
             -p 8080:80 \
+            -p 11020:10020 \
             wrapper-v2:${{ github.sha }}
-          ok=0
+          http_ok=0
           for i in $(seq 1 40); do
             if curl -sf http://127.0.0.1:8080/health >/dev/null; then
               echo "health OK after ${i} attempt(s)"
-              ok=1
+              http_ok=1
               break
             fi
             sleep 0.5
           done
-          if [[ "$ok" != "1" ]]; then
+          if [[ "$http_ok" != "1" ]]; then
             echo "::error::health did not become ready in time"
             docker logs wrapper-smoke 2>&1 || true
             docker rm -f wrapper-smoke 2>/dev/null || true
             exit 1
           fi
           curl -sf http://127.0.0.1:8080/health | jq .
+
+          tcp_ok=0
+          for i in $(seq 1 20); do
+            if timeout 2 bash -c '</dev/tcp/127.0.0.1/11020' 2>/dev/null; then
+              echo "TCP decrypt listener OK after ${i} attempt(s)"
+              tcp_ok=1
+              break
+            fi
+            sleep 0.5
+          done
+          if [[ "$tcp_ok" != "1" ]]; then
+            echo "::error::TCP decrypt listener did not accept connections in time"
+            docker logs wrapper-smoke 2>&1 || true
+            docker rm -f wrapper-smoke 2>/dev/null || true
+            exit 1
+          fi
           docker rm -f wrapper-smoke
