@@ -1,9 +1,9 @@
 use std::fmt;
-use std::io::{self, BufWriter, Read};
+use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -37,7 +37,7 @@ pub struct WorkerResponse {
 
 struct WorkerProcess {
     child: Child,
-    stdin: BufWriter<ChildStdin>,
+    stdin: ChildStdin,
     stdout: ChildStdout,
 }
 
@@ -112,10 +112,8 @@ impl Worker {
 
     fn request(&self, opcode: u16, payload: Vec<u8>) -> Result<protocol::Frame, WorkerError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut guard = self
-            .proc
-            .lock()
-            .map_err(|_| WorkerError::Unavailable("worker mutex poisoned".to_string()))?;
+        let deadline = Instant::now() + self.request_timeout;
+        let mut guard = lock_worker_timeout(&self.proc, deadline)?;
         if guard.is_none() {
             *guard = Some(self.spawn()?);
         }
@@ -135,11 +133,18 @@ impl Worker {
             flags: 0,
             payload,
         };
-        if let Err(e) = protocol::write_frame(&mut proc.stdin, &req) {
+        if let Err(e) = write_frame_timeout(&mut proc.stdin, &req, deadline) {
+            if e.kind() == io::ErrorKind::TimedOut {
+                eprintln!(
+                    "wrapperd: worker request opcode={opcode} timed out while writing after {:?}; restarting worker",
+                    self.request_timeout
+                );
+                kill_worker(proc);
+            }
             *guard = None;
             return Err(WorkerError::Io(e.to_string()));
         }
-        let resp = match read_frame_timeout(&mut proc.stdout, self.request_timeout) {
+        let resp = match read_frame_timeout(&mut proc.stdout, deadline) {
             Ok(frame) => frame,
             Err(e) => {
                 if e.kind() == io::ErrorKind::TimedOut {
@@ -181,7 +186,7 @@ impl Worker {
         let _ = &self.version;
         Ok(WorkerProcess {
             child,
-            stdin: BufWriter::new(stdin),
+            stdin,
             stdout,
         })
     }
@@ -216,13 +221,60 @@ fn io_err(e: io::Error) -> WorkerError {
     WorkerError::Io(e.to_string())
 }
 
+fn lock_worker_timeout(
+    proc: &Mutex<Option<WorkerProcess>>,
+    deadline: Instant,
+) -> Result<MutexGuard<'_, Option<WorkerProcess>>, WorkerError> {
+    loop {
+        match proc.try_lock() {
+            Ok(g) => return Ok(g),
+            Err(TryLockError::Poisoned(_)) => {
+                return Err(WorkerError::Unavailable(
+                    "worker mutex poisoned".to_string(),
+                ));
+            }
+            Err(TryLockError::WouldBlock) => {
+                if Instant::now() >= deadline {
+                    return Err(WorkerError::Unavailable(
+                        "worker busy timed out".to_string(),
+                    ));
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+}
+
 fn kill_worker(proc: &mut WorkerProcess) {
     let _ = proc.child.kill();
     let _ = proc.child.wait();
 }
 
-fn read_frame_timeout(stdout: &mut ChildStdout, timeout: Duration) -> io::Result<protocol::Frame> {
-    let deadline = Instant::now() + timeout;
+fn write_frame_timeout(
+    stdin: &mut ChildStdin,
+    frame: &protocol::Frame,
+    deadline: Instant,
+) -> io::Result<()> {
+    if frame.payload.len() > u32::MAX as usize {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "payload too large",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(20 + frame.payload.len());
+    bytes.extend_from_slice(&protocol::MAGIC.to_be_bytes());
+    bytes.extend_from_slice(&protocol::VERSION.to_be_bytes());
+    bytes.extend_from_slice(&frame.kind.to_be_bytes());
+    bytes.extend_from_slice(&frame.request_id.to_be_bytes());
+    bytes.extend_from_slice(&frame.opcode.to_be_bytes());
+    bytes.extend_from_slice(&frame.flags.to_be_bytes());
+    bytes.extend_from_slice(&(frame.payload.len() as u32).to_be_bytes());
+    bytes.extend_from_slice(&frame.payload);
+    write_all_timeout(stdin, &bytes, deadline)?;
+    stdin.flush()
+}
+
+fn read_frame_timeout(stdout: &mut ChildStdout, deadline: Instant) -> io::Result<protocol::Frame> {
     let mut h = [0u8; 20];
     read_exact_timeout(stdout, &mut h, deadline)?;
     let magic = u32::from_be_bytes([h[0], h[1], h[2], h[3]]);
@@ -252,6 +304,28 @@ fn read_frame_timeout(stdout: &mut ChildStdout, timeout: Duration) -> io::Result
     })
 }
 
+fn write_all_timeout<W: Write + AsRawFd>(
+    writer: &mut W,
+    mut buf: &[u8],
+    deadline: Instant,
+) -> io::Result<()> {
+    while !buf.is_empty() {
+        wait_writable(writer.as_raw_fd(), deadline)?;
+        match writer.write(buf) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "worker stdin closed",
+                ))
+            }
+            Ok(n) => buf = &buf[n..],
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
 fn read_exact_timeout<R: Read + AsRawFd>(
     reader: &mut R,
     mut buf: &mut [u8],
@@ -278,9 +352,17 @@ fn read_exact_timeout<R: Read + AsRawFd>(
 }
 
 fn wait_readable(fd: i32, deadline: Instant) -> io::Result<()> {
+    wait_fd(fd, libc::POLLIN, "worker stdout closed", deadline)
+}
+
+fn wait_writable(fd: i32, deadline: Instant) -> io::Result<()> {
+    wait_fd(fd, libc::POLLOUT, "worker stdin closed", deadline)
+}
+
+fn wait_fd(fd: i32, events: i16, closed_message: &str, deadline: Instant) -> io::Result<()> {
     let mut pfd = libc::pollfd {
         fd,
-        events: libc::POLLIN,
+        events,
         revents: 0,
     };
     loop {
@@ -297,10 +379,7 @@ fn wait_readable(fd: i32, deadline: Instant) -> io::Result<()> {
         let n = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
         if n > 0 {
             if pfd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "worker stdout closed",
-                ));
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, closed_message));
             }
             return Ok(());
         }
