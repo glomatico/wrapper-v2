@@ -49,6 +49,7 @@ pub struct Worker {
     restart_count: AtomicU32,
     timeout_count: AtomicU32,
     waiting_count: AtomicU32,
+    pid: AtomicU32,
     proc: Mutex<Option<WorkerProcess>>,
     state: Mutex<WorkerState>,
 }
@@ -85,6 +86,7 @@ impl Worker {
             restart_count: AtomicU32::new(0),
             timeout_count: AtomicU32::new(0),
             waiting_count: AtomicU32::new(0),
+            pid: AtomicU32::new(0),
             proc: Mutex::new(None),
             state: Mutex::new(WorkerState {
                 current: None,
@@ -103,6 +105,7 @@ impl Worker {
             if p.child.try_wait().map_err(io_err)?.is_none() {
                 return Ok(());
             }
+            self.pid.store(0, Ordering::Relaxed);
         }
         *guard = Some(self.spawn()?);
         Ok(())
@@ -119,11 +122,10 @@ impl Worker {
             .lock()
             .map(|s| (s.last_error.clone(), s.last_restart_reason.clone()))
             .unwrap_or((None, None));
-        let pid = self
-            .proc
-            .try_lock()
-            .ok()
-            .and_then(|g| g.as_ref().map(|p| p.child.id()));
+        let pid = match self.pid.load(Ordering::Relaxed) {
+            0 => None,
+            pid => Some(pid),
+        };
         json!({
             "pid": pid,
             "request_timeout_secs": self.request_timeout.as_secs(),
@@ -185,6 +187,7 @@ impl Worker {
                         self.request_timeout
                     );
                     self.timeout_count.fetch_add(1, Ordering::Relaxed);
+                    self.kill_current_worker_if_stuck("lock wait timeout");
                 }
                 self.record_error(e.to_string());
                 return Err(e);
@@ -267,6 +270,7 @@ impl Worker {
             .stdout
             .take()
             .ok_or_else(|| WorkerError::Io("worker stdout unavailable".to_string()))?;
+        self.pid.store(child.id(), Ordering::Relaxed);
         let _ = &self.version;
         Ok(WorkerProcess {
             child,
@@ -283,6 +287,7 @@ impl Worker {
             };
             guard.take()
         };
+        self.pid.store(0, Ordering::Relaxed);
         cleanup_worker(old, "restart requested by worker response");
         self.record_restart("restart requested by worker response");
         thread::sleep(Duration::from_secs(1));
@@ -334,8 +339,33 @@ impl Worker {
         reason: &'static str,
     ) {
         let old = guard.take();
+        self.pid.store(0, Ordering::Relaxed);
         cleanup_worker(old, reason);
         self.record_restart(reason);
+    }
+
+    fn kill_current_worker_if_stuck(&self, reason: &'static str) {
+        let stuck = self
+            .state
+            .lock()
+            .ok()
+            .and_then(|s| s.current.clone())
+            .map(|r| r.started.elapsed() >= self.request_timeout)
+            .unwrap_or(false);
+        if !stuck {
+            return;
+        }
+        let pid = self.pid.swap(0, Ordering::Relaxed);
+        if pid == 0 {
+            return;
+        }
+        self.record_restart(reason);
+        thread::spawn(move || {
+            eprintln!("wrapperd: killing stuck worker pid={pid}: {reason}");
+            unsafe {
+                libc::kill(pid as libc::pid_t, libc::SIGKILL);
+            }
+        });
     }
 }
 
