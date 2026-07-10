@@ -187,7 +187,7 @@ impl Worker {
                         self.request_timeout
                     );
                     self.timeout_count.fetch_add(1, Ordering::Relaxed);
-                    self.kill_current_worker_if_stuck("lock wait timeout");
+                    self.recover_stuck_worker_or_exit("lock wait timeout");
                 }
                 self.record_error(e.to_string());
                 return Err(e);
@@ -270,6 +270,8 @@ impl Worker {
             .stdout
             .take()
             .ok_or_else(|| WorkerError::Io("worker stdout unavailable".to_string()))?;
+        set_nonblocking(&stdin)?;
+        set_nonblocking(&stdout)?;
         self.pid.store(child.id(), Ordering::Relaxed);
         let _ = &self.version;
         Ok(WorkerProcess {
@@ -344,7 +346,7 @@ impl Worker {
         self.record_restart(reason);
     }
 
-    fn kill_current_worker_if_stuck(&self, reason: &'static str) {
+    fn recover_stuck_worker_or_exit(&self, reason: &'static str) {
         let stuck = self
             .state
             .lock()
@@ -357,7 +359,10 @@ impl Worker {
         }
         let pid = self.pid.swap(0, Ordering::Relaxed);
         if pid == 0 {
-            return;
+            eprintln!(
+                "wrapperd: fatal: worker request is stale, but no worker pid is available; exiting for container restart"
+            );
+            std::process::exit(70);
         }
         self.record_restart(reason);
         thread::spawn(move || {
@@ -367,6 +372,19 @@ impl Worker {
             }
         });
     }
+}
+
+fn set_nonblocking<T: AsRawFd>(fd: &T) -> Result<(), WorkerError> {
+    let raw = fd.as_raw_fd();
+    let flags = unsafe { libc::fcntl(raw, libc::F_GETFL) };
+    if flags < 0 {
+        return Err(io_err(io::Error::last_os_error()));
+    }
+    let rc = unsafe { libc::fcntl(raw, libc::F_SETFL, flags | libc::O_NONBLOCK) };
+    if rc < 0 {
+        return Err(io_err(io::Error::last_os_error()));
+    }
+    Ok(())
 }
 
 impl Drop for WaitTracker<'_> {
@@ -502,6 +520,7 @@ fn write_all_timeout<W: Write + AsRawFd>(
             }
             Ok(n) => buf = &buf[n..],
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
             Err(e) => return Err(e),
         }
     }
@@ -527,6 +546,7 @@ fn read_exact_timeout<R: Read + AsRawFd>(
                 buf = &mut tmp[n..];
             }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
             Err(e) => return Err(e),
         }
     }
