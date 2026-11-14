@@ -99,6 +99,8 @@ static Json signed_request(Runtime& r,const std::string& url,const Json* payload
     return result;
 }
 bool Session::validate_cached() {
+    wipe(dev_token_.value);
+    wipe(music_token_.value);
     Shared bag;std::string storefront;
     call<void>(names::RequestContext_storeFrontIdentifier,&storefront,runtime_.request.get(),&bag);
     if(storefront.empty())return false;
@@ -115,12 +117,16 @@ bool Session::validate_cached() {
     auto result=signed_request(runtime_,"https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/createMusicToken",&payload);
     JsonGuard rg{result};
     if(!result.contains("music_token")||!result["music_token"].is_string()||result["music_token"].get_ref<const std::string&>().empty())return false;
-    storefront_=std::move(storefront);return true;
+    storefront_=std::move(storefront);
+    dev_token_.value=token["token"].get<std::string>();
+    music_token_.value=result["music_token"].get<std::string>();
+    return true;
 }
 Json Session::restore() {
     struct stat st{};
     if(!runtime_.cached_session||stat((runtime_.directory+"/mpl_db/kvs.sqlitedb").c_str(),&st)||!S_ISREG(st.st_mode)||st.st_size<=0)throw Error("no_cached_session");
     callback_failed_=false;state_="logged_out";storefront_.clear();
+    wipe(dev_token_.value);wipe(music_token_.value);
     if(!validate_cached()||callback_failed_){expire();throw Error("session_expired");}
     state_="authenticated";runtime_.lease();return status();
 }
@@ -143,9 +149,18 @@ Json Session::login(const Json& params,const std::string& id) {
     state_="authenticated";runtime_.lease();return status();
 }
 Json Session::status() const {return {{"state",state_},{"storefront",storefront_}};}
+Json Session::export_credentials() {
+    require();
+    if(dev_token_.value.empty()||music_token_.value.empty())
+        throw Error("session_expired");
+    return {{"dev_token",dev_token_.value},{"music_user_token",music_token_.value}};
+}
 void Session::require(){
     if(state_=="expired")throw Error("session_expired");
     if(state_!="authenticated")throw Error("authentication_required");
 }
-void Session::expire(){state_="expired";storefront_.clear();}
+void Session::expire(){
+    state_="expired";storefront_.clear();
+    wipe(dev_token_.value);wipe(music_token_.value);
+}
 }

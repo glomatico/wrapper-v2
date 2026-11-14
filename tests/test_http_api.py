@@ -15,7 +15,6 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
-TOKEN = "unit-tests-only-0123456789abcdefghijklmnopqrstuvwxyz"
 
 
 class ServerContract(unittest.TestCase):
@@ -35,7 +34,7 @@ class ServerContract(unittest.TestCase):
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             cls.port = sock.getsockname()[1]
-        env = dict(os.environ, WRAPPER_API_TOKEN=TOKEN,
+        env = dict(os.environ,
                    WRAPPER_HOST="127.0.0.1", WRAPPER_PORT=str(cls.port),
                    WRAPPER_LAUNCHER=str(cls.launcher),
                    WRAPPER_ROOTFS=str(directory),
@@ -69,8 +68,6 @@ class ServerContract(unittest.TestCase):
     @classmethod
     def request(cls, method, path, payload=None, auth=True):
         headers = {"Content-Type": "application/json"}
-        if auth:
-            headers["Authorization"] = "Bearer " + TOKEN
         data = json.dumps(payload).encode() if payload is not None else None
         request = Request(
             f"http://127.0.0.1:{cls.port}{path}", data=data,
@@ -84,16 +81,18 @@ class ServerContract(unittest.TestCase):
         assert response.headers["Cache-Control"] == "no-store"
         return response.status, content
 
-    def test_01_authorization_and_info(self):
+    def test_01_unversioned_api_without_bearer(self):
         health_status, health = self.request("GET", "/health", auth=False)
         self.assertEqual(health_status, 200)
         self.assertEqual(health["version"], "1.0.0")
-        self.assertEqual(self.request("GET", "/info", auth=False)[0], 401)
+        self.assertEqual(self.request("GET", "/info", auth=False)[0], 200)
+        self.assertEqual(self.request("GET", "/session/credentials")[0], 403)
         status, info = self.request("GET", "/info")
         self.assertEqual(status, 200)
         self.assertEqual(info["decryption"], "client_side")
         self.assertEqual(info["version"], "1.0.0")
         self.assertEqual(info["protocol_version"], 1)
+        self.assertIn("credentials", info["features"])
         self.assertEqual(self.request("GET", "/v1/info")[0], 404)
         self.assertEqual(self.request("GET", "/v1/session")[0], 404)
 
@@ -156,6 +155,12 @@ class ServerContract(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(session["state"], "authenticated")
         self.assertEqual(self.request("GET", "/session")[1]["state"], "authenticated")
+
+    def test_07_credentials_export(self):
+        status, credentials = self.request("GET", "/session/credentials", auth=False)
+        self.assertEqual(status, 200)
+        self.assertEqual(credentials["dev_token"], "mock-developer-token")
+        self.assertEqual(credentials["music_user_token"], "mock-media-user-token")
 
 
 if __name__ == "__main__":

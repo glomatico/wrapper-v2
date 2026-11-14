@@ -9,7 +9,6 @@ const DEFAULT_SESSION_DIR: &str = "/data/data/com.apple.android.music/files";
 pub struct Config {
     pub host: IpAddr,
     pub port: u16,
-    pub token: String,
     pub launcher: PathBuf,
     pub rootfs: PathBuf,
     pub session_dir: String,
@@ -29,11 +28,6 @@ impl Config {
             .map_err(|_| ApiError::bad_config("WRAPPER_PORT"))?;
         if port == 0 {
             return Err(ApiError::bad_config("WRAPPER_PORT"));
-        }
-        let token =
-            env::var("WRAPPER_API_TOKEN").map_err(|_| ApiError::bad_config("WRAPPER_API_TOKEN"))?;
-        if token.len() < 32 || !token.bytes().all(|c| (0x21..=0x7e).contains(&c)) {
-            return Err(ApiError::bad_config("WRAPPER_API_TOKEN"));
         }
         let launcher =
             env::var("WRAPPER_LAUNCHER").unwrap_or_else(|_| "./build/host/worker-launch".into());
@@ -70,7 +64,6 @@ impl Config {
         Ok(Self {
             host,
             port,
-            token,
             launcher,
             rootfs,
             session_dir,

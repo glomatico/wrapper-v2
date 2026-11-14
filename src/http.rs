@@ -7,7 +7,6 @@ use form_urlencoded::parse;
 use http_body_util::{BodyExt, Full};
 use hyper::{body::Incoming, header, Method, Request, Response, StatusCode};
 use serde_json::{json, Value};
-use subtle::ConstantTimeEq;
 use tokio::time::timeout;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -23,14 +22,12 @@ type HttpResponse = Response<Full<Bytes>>;
 
 pub struct Api {
     supervisor: Arc<Supervisor>,
-    token: String,
 }
 
 impl Api {
     pub fn new(config: &Config) -> Arc<Self> {
         Arc::new(Self {
             supervisor: Supervisor::new(config.clone()),
-            token: config.token.clone(),
         })
     }
 
@@ -55,17 +52,6 @@ impl Api {
                 json!({"status":"ok","version":env!("CARGO_PKG_VERSION")}),
             ));
         }
-        let auth = parts
-            .headers
-            .get(header::AUTHORIZATION)
-            .and_then(|h| h.to_str().ok())
-            .and_then(|h| h.strip_prefix("Bearer "));
-        let valid = auth
-            .map(|s| bool::from(self.token.as_bytes().ct_eq(s.as_bytes())))
-            .unwrap_or(false);
-        if !valid {
-            return Err(ApiError::simple("unauthorized", StatusCode::UNAUTHORIZED));
-        }
         if parts.uri.to_string().len() > QUERY_LIMIT {
             return Err(ApiError::bad_request("request_target_too_large"));
         }
@@ -77,11 +63,14 @@ impl Api {
                     "version":env!("CARGO_PKG_VERSION"), "protocol_version":1,
                     "context_format":"temari", "profile":PROFILE,
                     "architecture":"x86_64",
-                    "features":["session","two_factor","playback","context"],
+                    "features":["session","two_factor","credentials","playback","context"],
                     "decryption":"client_side"
                 }),
             )),
             (Method::GET, "/session") => self.result("session.status", json!({})).await,
+            (Method::GET, "/session/credentials") => {
+                self.result("session.credentials", json!({})).await
+            }
             (Method::POST, "/session/restore") => {
                 empty_body(body).await?;
                 self.result("session.restore", json!({})).await

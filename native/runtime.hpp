@@ -48,7 +48,7 @@ class Session {
     Runtime& runtime_;
     Protocol& protocol_;
     std::string state_="logged_out",storefront_,request_id_;
-    Secret username_,password_;
+    Secret username_,password_,dev_token_,music_token_;
     unsigned challenge_=0,credentials_count_=0;
     bool login_active_=false,callback_failed_=false;
     static Session* active_;
@@ -63,6 +63,7 @@ public:
     Json restore();
     Json login(const Json&,const std::string& id);
     Json status() const;
+    Json export_credentials();
     void require();
     void expire();
 };

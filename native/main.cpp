@@ -47,6 +47,7 @@ int main() {
             } else {
                 if(!runtime->initialized)throw Error("not_initialized");
                 if(op=="session.status")result=session->status();
+                else if(op=="session.credentials")result=session->export_credentials();
                 else if(op=="session.restore")result=session->restore();
                 else if(op=="session.login")result=session->login(params,id);
                 else if(op=="playback.get"||op=="context.get") {

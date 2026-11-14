@@ -57,6 +57,12 @@ def main():
             reply(id_, {"profile": PROFILE, "protocol": 1, "session": {"state": session}})
         elif op == "session.status":
             reply(id_, {"state": session, "storefront": "143441"})
+        elif op == "session.credentials":
+            if session != "authenticated":
+                reply(id_, error="authentication_required")
+            else:
+                reply(id_, {"dev_token": "mock-developer-token",
+                            "music_user_token": "mock-media-user-token"})
         elif op == "session.restore":
             session = "authenticated"
             reply(id_, {"state": session, "storefront": "143441"})

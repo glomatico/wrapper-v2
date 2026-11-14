@@ -19,7 +19,6 @@ services:
     ports:
       - "127.0.0.1:${WRAPPER_HTTP_PORT:-40020}:40020"
     environment:
-      WRAPPER_API_TOKEN: "${WRAPPER_API_TOKEN:?Set a random 32+ character bearer token}"
       WRAPPER_DEVICE_INFO: "${WRAPPER_DEVICE_INFO:?Set a stable nine-field device identifier}"
       WRAPPER_DNS: "${WRAPPER_DNS:-1.1.1.1,8.8.8.8}"
     volumes:
