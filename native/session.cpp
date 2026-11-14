@@ -1,0 +1,147 @@
+#include "runtime.hpp"
+#include <sys/stat.h>
+#include <chrono>
+namespace worker {
+Session* Session::active_=nullptr;
+void Session::attach() {
+    active_=this;
+    call<void>(names::API_setCredentialsHandler,runtime_.presentation.get(),&Session::credentials);
+    call<void>(names::API_setDialogHandler,runtime_.presentation.get(),&Session::dialog);
+}
+void Session::credentials(Shared* request,Shared*) noexcept {
+    try { if(active_) active_->credentials_impl(request); }
+    catch(...) { _exit(70); } // Never unwind into proprietary callback code.
+}
+void Session::dialog(long id,Shared* dialog,Shared*) noexcept {
+    try { if(active_)active_->dialog_impl(id,dialog); }
+    catch(...) { _exit(70); }
+}
+void Session::credentials_impl(Shared* request) {
+    auto response=emplace_native(80,24,names::vtable_CredentialsResponse,names::CredentialsResponse_ctor);
+    bool submit=login_active_&&++credentials_count_<=3;
+    Secret password;
+    if(submit) {
+        password.value=password_.value;
+        bool two=request&&*request&&call<bool>(names::CR_requiresHSA2VerificationCode,request->get());
+        if(two) {
+            auto challenge=std::to_string(++challenge_);
+            protocol_.write({{"v",1},{"id",request_id_},{"event","auth.challenge"},{"challenge_id",challenge},{"kind","two_factor"}});
+            Json continuation;JsonGuard guard{continuation};
+            if(!protocol_.read(continuation))_exit(65);
+            Protocol::validate(continuation);
+            if(continuation["id"]!=request_id_||continuation["op"]!="auth.respond"||continuation["params"].value("challenge_id",std::string())!=challenge)_exit(65);
+            auto code=string_param(continuation["params"],"code",8,true);
+            if(code.empty())submit=false;
+            else if(code.size()!=6||code.find_first_not_of("0123456789")!=std::string::npos)submit=false;
+            else password.value+=code;
+            wipe(code);
+        }
+    }
+    if(submit) {
+        call<void>(names::CredentialsResponse_setUserName,response.get(),&username_.value);
+        call<void>(names::CredentialsResponse_setPassword,response.get(),&password.value);
+    } else {callback_failed_=true;state_="expired";}
+    call<void>(names::CredentialsResponse_setResponseType,response.get(),submit?2:0);
+    call<void>(names::API_handleCredentialsResponse,runtime_.presentation.get(),&response);
+}
+void Session::dialog_impl(long id,Shared* dialog) {
+    auto response=emplace_native(72,24,names::vtable_ProtocolDialogResponse,names::ProtocolDialogResponse_ctor);
+    bool selected=false;
+    if(login_active_&&dialog&&*dialog) {
+        auto title=call<const std::string*>(names::ProtocolDialog_title,dialog->get());
+        auto buttons=call<const std::vector<Shared>*>(names::ProtocolDialog_buttons,dialog->get());
+        if(title&&*title=="Sign In"&&buttons&&buttons->size()<=32)for(const auto& b:*buttons) {
+            if(!b)continue;
+            auto label=call<const std::string*>(names::ProtocolButton_title,b.get());
+            if(label&&*label=="Use Existing Apple ID") {
+                call<void>(names::ProtocolDialogResponse_setSelectedButton,response.get(),&b);selected=true;break;
+            }
+        }
+    }
+    if(!selected)callback_failed_=true;
+    call<void>(names::API_handleProtocolDialogResponse,runtime_.presentation.get(),&id,&response);
+}
+static Json signed_request(Runtime& r,const std::string& url,const Json* payload) {
+    auto destroy=symbol<void(*)(void*)>(names::HTTPMessage_dtor);
+    void* memory=::operator new(4096);std::memset(memory,0,4096);
+    call<void>(names::HTTPMessage_ctor_c1,memory,url,std::string(payload?"POST":"GET"));
+    Shared message(memory,[destroy](void* p){destroy(p);::operator delete(p);});
+    auto header=[&](std::string key,std::string value){call<void>(names::HTTPMessage_setHeader,memory,&key,&value);};
+    Secret body;
+    if(payload) {
+        header("Content-Type","application/json; charset=UTF-8");header("Expect","");
+        header("X-Apple-Requesting-Bundle-Id","com.apple.android.music");
+        header("X-Apple-Requesting-Bundle-Version","Music/4.9 Android/10 model/Samsung S9 build/7663313 (dt:66)");
+        body.value=payload->dump();
+        call<void>(names::HTTPMessage_setBodyData,memory,body.value.data(),body.value.size());
+    }
+    NativeObject request(8192,names::URLRequest_dtor);
+    call<void>(names::URLRequest_ctor,request.data,&message,&r.request);
+    if(!payload) {
+        std::string client="clientId",music="musicAndroid",version="version",one="1";
+        call<void>(names::URLRequest_setRequestParameter,request.data,&client,&music);
+        call<void>(names::URLRequest_setRequestParameter,request.data,&version,&one);
+    }
+    call<void>(names::URLRequest_run,request.data);
+    auto error=call<Shared*>(names::URLRequest_error,request.data);
+    if(error&&*error)throw Error("session_validation_failed",true);
+    auto response=call<Shared*>(names::URLRequest_response,request.data);
+    if(!response||!*response)throw Error("session_validation_failed",true);
+    auto inner=call<Shared*>(names::URLResponse_underlyingResponse,response->get());
+    if(!inner||!*inner)throw Error("session_validation_failed",true);
+    void* data=nullptr;std::memcpy(&data,static_cast<unsigned char*>(inner->get())+48,sizeof data);
+    if(!data)throw Error("session_validation_failed",true);
+    auto bytes=call<const char*>(names::Data_bytes,data);
+    auto length=call<size_t>(names::Data_length,data);
+    if(!bytes||!length||length>1024*1024)throw Error("session_validation_failed",true);
+    // Native Data may contain a trailing NUL; accept it, not arbitrary suffixes.
+    while(length&&bytes[length-1]=='\0')--length;
+    auto result=Json::parse(bytes,bytes+length,nullptr,false);
+    if(result.is_discarded()||!result.is_object())throw Error("session_validation_failed",true);
+    return result;
+}
+bool Session::validate_cached() {
+    Shared bag;std::string storefront;
+    call<void>(names::RequestContext_storeFrontIdentifier,&storefront,runtime_.request.get(),&bag);
+    if(storefront.empty())return false;
+    auto token=signed_request(runtime_,"https://sf-api-token-service.itunes.apple.com/apiToken",nullptr);
+    JsonGuard tg{token};
+    if(!token.contains("token")||!token["token"].is_string()||token["token"].get_ref<const std::string&>().empty())return false;
+    Shared guid;
+    call<void>(names::DeviceGUID_guid,&guid,runtime_.guid.get());
+    if(!guid)return false;
+    auto bytes=call<const char*>(names::Data_bytes,guid.get());
+    if(!bytes)return false;
+    Json payload={{"guid",std::string(bytes)},{"assertion",token["token"]},{"tcc-acceptance-date",std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count())}};
+    JsonGuard pg{payload};
+    auto result=signed_request(runtime_,"https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/createMusicToken",&payload);
+    JsonGuard rg{result};
+    if(!result.contains("music_token")||!result["music_token"].is_string()||result["music_token"].get_ref<const std::string&>().empty())return false;
+    storefront_=std::move(storefront);return true;
+}
+Json Session::restore() {
+    if(state_=="authenticated")throw Error("already_authenticated");
+    struct stat st{};
+    if(stat((runtime_.directory+"/mpl_db/kvs.sqlitedb").c_str(),&st)||!S_ISREG(st.st_mode)||st.st_size<=0)throw Error("no_cached_session");
+    callback_failed_=false;state_="logged_out";storefront_.clear();
+    if(!validate_cached()||callback_failed_)throw Error("session_expired");
+    state_="authenticated";runtime_.lease();return status();
+}
+Json Session::login(const Json& params,const std::string& id) {
+    if(state_=="authenticated")throw Error("already_authenticated");
+    username_.value=string_param(params,"username",320);
+    password_.value=string_param(params,"password",4096);
+    request_id_=id;credentials_count_=0;callback_failed_=false;login_active_=true;
+    struct Guard{Session& s;~Guard(){s.login_active_=false;wipe(s.username_.value);wipe(s.password_.value);}} guard{*this};
+    Shared flow;call<void>(names::make_shared_AuthenticateFlow,&flow,&runtime_.request);
+    if(!flow)throw Error("authentication_failed");
+    call<void>(names::AuthenticateFlow_run,flow.get());
+    auto response=call<Shared*>(names::AuthenticateFlow_response,flow.get());
+    if(!response||!*response||call<int>(names::AR_responseType,response->get())!=6||callback_failed_){state_="logged_out";throw Error("authentication_failed");}
+    if(!validate_cached()){state_="logged_out";throw Error("session_validation_failed",true);}
+    state_="authenticated";runtime_.lease();return status();
+}
+Json Session::status() const {return {{"state",state_},{"storefront",storefront_}};}
+void Session::require(){if(state_!="authenticated")throw Error("authentication_required");}
+void Session::expire(){state_="expired";storefront_.clear();}
+}
