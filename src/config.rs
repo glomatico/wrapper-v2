@@ -23,7 +23,7 @@ impl Config {
             .parse()
             .map_err(|_| ApiError::bad_config("WRAPPER_HOST"))?;
         let port = env::var("WRAPPER_PORT")
-            .unwrap_or_else(|_| "40020".into())
+            .unwrap_or_else(|_| "80".into())
             .parse::<u16>()
             .map_err(|_| ApiError::bad_config("WRAPPER_PORT"))?;
         if port == 0 {

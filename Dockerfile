@@ -20,11 +20,11 @@ LABEL org.opencontainers.image.title="Wrapper-v2" \
       org.opencontainers.image.description="Standalone Temari-compatible Apple Music context provider"
 
 ENV WRAPPER_HOST=0.0.0.0 \
-    WRAPPER_PORT=40020 \
+    WRAPPER_PORT=80 \
     WRAPPER_LAUNCHER=/usr/local/bin/worker-launch \
     WRAPPER_ROOTFS=/srv/wrapper/rootfs
 
 WORKDIR /srv/wrapper
 USER 1000:1000
-EXPOSE 40020
+EXPOSE 80
 ENTRYPOINT ["/usr/local/bin/wrapperd"]

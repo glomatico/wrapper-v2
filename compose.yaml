@@ -17,7 +17,7 @@ services:
     security_opt:
       - apparmor:unconfined
     ports:
-      - "127.0.0.1:${WRAPPER_HTTP_PORT:-40020}:40020"
+      - "127.0.0.1:${WRAPPER_HTTP_PORT:-80}:80"
     environment:
       WRAPPER_DEVICE_INFO: "${WRAPPER_DEVICE_INFO:?Set a stable nine-field device identifier}"
       WRAPPER_DNS: "${WRAPPER_DNS:-1.1.1.1,8.8.8.8}"
