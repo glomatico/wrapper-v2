@@ -85,32 +85,37 @@ class ServerContract(unittest.TestCase):
         return response.status, content
 
     def test_01_authorization_and_info(self):
-        self.assertEqual(self.request("GET", "/health", auth=False)[0], 200)
-        self.assertEqual(self.request("GET", "/v1/info", auth=False)[0], 401)
-        status, info = self.request("GET", "/v1/info")
+        health_status, health = self.request("GET", "/health", auth=False)
+        self.assertEqual(health_status, 200)
+        self.assertEqual(health["version"], "1.0.0")
+        self.assertEqual(self.request("GET", "/info", auth=False)[0], 401)
+        status, info = self.request("GET", "/info")
         self.assertEqual(status, 200)
         self.assertEqual(info["decryption"], "client_side")
-        self.assertEqual(info["version"], 1)
+        self.assertEqual(info["version"], "1.0.0")
+        self.assertEqual(info["protocol_version"], 1)
+        self.assertEqual(self.request("GET", "/v1/info")[0], 404)
+        self.assertEqual(self.request("GET", "/v1/session")[0], 404)
 
     def test_02_login_challenge_and_busy(self):
-        status, info = self.request("POST", "/v1/session/login",
+        status, info = self.request("POST", "/session/login",
                                     {"username": "twofactor", "password": "dummy"})
         self.assertEqual(status, 202)
         self.assertEqual(info["kind"], "two_factor")
-        self.assertEqual(self.request("GET", "/v1/session")[0], 503)
-        self.assertEqual(self.request("POST", "/v1/session/challenge",
+        self.assertEqual(self.request("GET", "/session")[0], 503)
+        self.assertEqual(self.request("POST", "/session/challenge",
                                       {"challenge_id": "incorrect", "code": "123456"})[0], 400)
-        status, info = self.request("POST", "/v1/session/challenge",
+        status, info = self.request("POST", "/session/challenge",
                                     {"challenge_id": info["challenge_id"], "code": "123456"})
         self.assertEqual(status, 200)
         self.assertEqual(info["state"], "authenticated")
 
     def test_03_playback_context_and_validation(self):
-        status, playback = self.request("GET", "/v1/playback?adam_id=12345")
+        status, playback = self.request("GET", "/playback?adam_id=12345")
         self.assertEqual(status, 200)
         self.assertEqual(playback["songList"][0]["id"], "12345")
         query = urlencode({"adam_id": "12345", "key_uri": "skd://example/test?x=1"})
-        status, context = self.request("GET", "/v1/context?" + query)
+        status, context = self.request("GET", "/context?" + query)
         self.assertEqual(status, 200)
         self.assertIn("ctx", context)
         self.assertTrue(context["profile"].startswith("apple-music-"))
@@ -118,39 +123,39 @@ class ServerContract(unittest.TestCase):
             {"adamId": "12345", "uri": "skd://example/test?x=1"}))
         self.assertEqual(status, 200)
         self.assertEqual(alias, context)
-        self.assertEqual(self.request("GET", "/v1/playback?adam_id=1&adam_id=2")[0], 400)
-        self.assertEqual(self.request("GET", "/v1/context?adam_id=1&key_uri=bad")[0], 400)
-        status, invalid = self.request("GET", "/v1/context?" + urlencode(
+        self.assertEqual(self.request("GET", "/playback?adam_id=1&adam_id=2")[0], 400)
+        self.assertEqual(self.request("GET", "/context?adam_id=1&key_uri=bad")[0], 400)
+        status, invalid = self.request("GET", "/context?" + urlencode(
             {"adam_id": "6666", "key_uri": "skd://test"}))
         self.assertEqual(status, 503)
         self.assertEqual(invalid["error"]["code"], "invalid_context")
         self.assertEqual(self.request("POST", "/decrypt", {"samples":[]})[0], 404)
 
     def test_04_worker_crashes_and_restarts(self):
-        self.assertEqual(self.request("GET", "/v1/playback?adam_id=8888")[0], 503)
-        self.assertEqual(self.request("GET", "/v1/session")[1]["state"], "logged_out")
-        self.assertEqual(self.request("POST", "/v1/session/restore")[0], 200)
-        self.assertEqual(self.request("GET", "/v1/playback?adam_id=9999")[0], 503)
-        self.assertEqual(self.request("GET", "/v1/session")[1]["state"], "logged_out")
-        self.assertEqual(self.request("POST", "/v1/session/close")[0], 200)
-        self.assertEqual(self.request("GET", "/v1/session")[1]["state"], "logged_out")
+        self.assertEqual(self.request("GET", "/playback?adam_id=8888")[0], 503)
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
+        self.assertEqual(self.request("POST", "/session/restore")[0], 200)
+        self.assertEqual(self.request("GET", "/playback?adam_id=9999")[0], 503)
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
+        self.assertEqual(self.request("POST", "/session/close")[0], 200)
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
 
     def test_05_two_factor_cancellation(self):
-        status, challenge = self.request("POST", "/v1/session/login",
+        status, challenge = self.request("POST", "/session/login",
                                          {"username": "twofactor", "password": "dummy"})
         self.assertEqual(status, 202)
-        status, error = self.request("POST", "/v1/session/challenge",
+        status, error = self.request("POST", "/session/challenge",
                                      {"challenge_id": challenge["challenge_id"], "code": ""})
         self.assertEqual(status, 502)
         self.assertEqual(error["error"]["code"], "authentication_failed")
-        self.assertEqual(self.request("GET", "/v1/session")[1]["state"], "logged_out")
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
 
     def test_06_direct_login_without_challenge(self):
-        status, session = self.request("POST", "/v1/session/login",
+        status, session = self.request("POST", "/session/login",
                                        {"username": "mock-account", "password": "mock-password"})
         self.assertEqual(status, 200)
         self.assertEqual(session["state"], "authenticated")
-        self.assertEqual(self.request("GET", "/v1/session")[1]["state"], "authenticated")
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "authenticated")
 
 
 if __name__ == "__main__":

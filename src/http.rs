@@ -1,4 +1,4 @@
-//! Versioned HTTP facade. The wire contract is independent of Gamdl.
+//! Unversioned HTTP facade for Wrapper-v2 1.0.0; native IPC uses protocol v1.
 use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Duration};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -71,25 +71,26 @@ impl Api {
         }
         let query = parse_query(parts.uri.query().unwrap_or(""))?;
         match (method, path) {
-            (Method::GET, "/v1/info") => Ok((
+            (Method::GET, "/info") => Ok((
                 StatusCode::OK,
                 json!({
-                    "version":1, "context_format":"temari", "profile":PROFILE,
+                    "version":env!("CARGO_PKG_VERSION"), "protocol_version":1,
+                    "context_format":"temari", "profile":PROFILE,
                     "architecture":"x86_64",
                     "features":["session","two_factor","playback","context"],
                     "decryption":"client_side"
                 }),
             )),
-            (Method::GET, "/v1/session") => self.result("session.status", json!({})).await,
-            (Method::POST, "/v1/session/restore") => {
+            (Method::GET, "/session") => self.result("session.status", json!({})).await,
+            (Method::POST, "/session/restore") => {
                 empty_body(body).await?;
                 self.result("session.restore", json!({})).await
             }
-            (Method::POST, "/v1/session/close") => {
+            (Method::POST, "/session/close") => {
                 empty_body(body).await?;
                 self.result("session.close", json!({})).await
             }
-            (Method::POST, "/v1/session/login") => {
+            (Method::POST, "/session/login") => {
                 let mut raw = read_body(body).await?;
                 let parsed = serde_json::from_slice::<Value>(&raw)
                     .map_err(|_| ApiError::bad_request("invalid_json"));
@@ -105,7 +106,7 @@ impl Api {
                 // Never log username, password or a request body.
                 login_response(self.supervisor.login(username, password).await?)
             }
-            (Method::POST, "/v1/session/challenge") => {
+            (Method::POST, "/session/challenge") => {
                 let mut raw = read_body(body).await?;
                 let parsed = serde_json::from_slice::<Value>(&raw)
                     .map_err(|_| ApiError::bad_request("invalid_json"));
@@ -124,13 +125,13 @@ impl Api {
                 }
                 login_response(self.supervisor.challenge(&id, code).await?)
             }
-            (Method::GET, "/v1/playback") => {
+            (Method::GET, "/playback") => {
                 let adam_id = get_param(&query, "adam_id")?;
                 validate_adam(adam_id)?;
                 self.result("playback.get", json!({"adam_id":adam_id}))
                     .await
             }
-            (Method::GET, "/v1/context") | (Method::GET, "/key") => {
+            (Method::GET, "/context") | (Method::GET, "/key") => {
                 let alias = path == "/key";
                 let adam_id = get_param(&query, if alias { "adamId" } else { "adam_id" })?;
                 let key_uri = get_param(&query, if alias { "uri" } else { "key_uri" })?;

@@ -1,0 +1,32 @@
+services:
+  wrapper:
+    image: wrapper-v2:1.0.0-local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Docker's daemon need not be rootless. The HTTP server itself runs as a
+    # non-root UID, while its native launcher temporarily receives capabilities.
+    user: "${WRAPPER_UID:-1000}:${WRAPPER_GID:-1000}"
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_ADMIN
+      - SYS_CHROOT
+    security_opt:
+      - apparmor:unconfined
+    ports:
+      - "127.0.0.1:${WRAPPER_HTTP_PORT:-40020}:40020"
+    environment:
+      WRAPPER_API_TOKEN: "${WRAPPER_API_TOKEN:?Set a random 32+ character bearer token}"
+      WRAPPER_DEVICE_INFO: "${WRAPPER_DEVICE_INFO:?Set a stable nine-field device identifier}"
+      WRAPPER_DNS: "${WRAPPER_DNS:-1.1.1.1,8.8.8.8}"
+    volumes:
+      # Prepared from a user-supplied *pinned* Apple Music APK. Not in image.
+      - ${WRAPPER_ROOTFS_DIR:-./build/rootfs}:/srv/wrapper/rootfs:ro
+      # Private writable state must be owned by WRAPPER_UID on the host.
+      - ${WRAPPER_DATA_DIR:-./data}:/srv/wrapper/rootfs/data/data/com.apple.android.music/files:rw
+    tmpfs:
+      - /srv/wrapper/rootfs/tmp:rw,nosuid,nodev,mode=1777
+    stop_grace_period: 15s
