@@ -1,5 +1,8 @@
 /target/
 
+# Local compose settings; may hold WRAPPER_USERNAME / WRAPPER_PASSWORD.
+/.env
+
 # Runtime/session data mounted by compose.yaml.
 /data/
 
