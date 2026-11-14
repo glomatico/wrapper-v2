@@ -70,7 +70,12 @@ void Protocol::validate(const Json& j) {
     if(!j.contains("v")||!j["v"].is_number_integer()||j["v"]!=1) throw Error("unsupported_protocol");
     string_param(j,"id",64); string_param(j,"op",64);
     if(!j.contains("params")||!j["params"].is_object()) throw Error("invalid_params");
-    if(j.contains("timeout_ms")&&(!j["timeout_ms"].is_number_integer()||j["timeout_ms"]<100||j["timeout_ms"]>180000)) throw Error("invalid_params");
+    // Interactive 2FA needs time for a human to retrieve the code. Only
+    // session.login may extend the native deadline to ten minutes; every
+    // other operation keeps the original three-minute upper bound.
+    const bool login=j["op"]=="session.login";
+    const unsigned maximum=login?600000:180000;
+    if(j.contains("timeout_ms")&&(!j["timeout_ms"].is_number_integer()||j["timeout_ms"]<100||j["timeout_ms"]>maximum)) throw Error("invalid_params");
 }
 std::string Protocol::challenge(const std::string& id,const std::string& challenge_id) {
     write({{"v",1},{"id",id},{"event","auth.challenge"},{"challenge_id",challenge_id},{"kind","two_factor"}});

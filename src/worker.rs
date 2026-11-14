@@ -35,7 +35,7 @@ pub(crate) fn wipe_json_value(value: &mut Value) {
 const MAX_REQUEST: usize = 1024 * 1024;
 const MAX_RESPONSE: usize = 4 * 1024 * 1024;
 const COMMAND_LIMIT: Duration = Duration::from_secs(125);
-const LOGIN_LIMIT: Duration = Duration::from_secs(185);
+const LOGIN_LIMIT: Duration = Duration::from_secs(610);
 
 pub enum LoginReply {
     Finished(Value),
@@ -170,7 +170,7 @@ impl Supervisor {
             control.ensure(&self.settings).await?;
             let id = control.allocate_id();
             let params = json!({"username":username.as_str(),"password":password.as_str()});
-            timeout_at(deadline, control.send(&id, "session.login", params, 180000))
+            timeout_at(deadline, control.send(&id, "session.login", params, 600000))
                 .await
                 .map_err(|_| ApiError::worker_unavailable("worker_timeout"))??;
             // The native worker is synchronous. Responses may include 2FA
