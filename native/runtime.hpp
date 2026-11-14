@@ -6,6 +6,7 @@
 #include <functional>
 #include <dlfcn.h>
 #include <cstring>
+#include <atomic>
 namespace worker {
 using Shared=std::shared_ptr<void>;
 static_assert(sizeof(Shared)==16 && sizeof(std::string)==24,"Pinned Android libc++ ABI required");
@@ -15,7 +16,7 @@ template<class T>T symbol(const char* name) {
 template<class R,class... Args>R call(const char* name,Args... args){return symbol<R(*)(Args...)>(name)(args...);}
 struct NativeObject {
     void* data; void(*destroy)(void*);
-    NativeObject(size_t size,const char* destructor):data(::operator new(size)),destroy(symbol<void(*)(void*)>(destructor)){std::memset(data,0,size);}
+    NativeObject(size_t size,const char* destructor):data(nullptr),destroy(symbol<void(*)(void*)>(destructor)){data=::operator new(size);std::memset(data,0,size);}
     ~NativeObject(){destroy(data);::operator delete(data);}
     NativeObject(const NativeObject&)=delete;
 };
@@ -35,7 +36,9 @@ public:
     void* foothill=nullptr;
     std::string directory;
     bool initialized=false;
-    bool lease_expired=false;
+    bool cached_session=false;
+    unsigned request_budget=128;
+    std::atomic<bool> lease_expired{false};
     void initialize(const Json&);
     void lease();
     Json playback(const std::string&);

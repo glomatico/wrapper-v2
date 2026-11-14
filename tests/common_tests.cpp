@@ -23,12 +23,36 @@ int main(){
     int fds[2];check(socketpair(AF_UNIX,SOCK_STREAM,0,fds)==0);Fd a(fds[0]),b(fds[1]);
     Protocol sender(a.value,a.value),receiver(b.value,b.value);
     sender.write(request);Json received;check(receiver.read(received));check(received==request);
+    const unsigned char malformed[]={0,0,0,1,'{'};
+    check(write(a.value,malformed,sizeof malformed)==sizeof malformed);
+    rejects([&]{receiver.read(received);},"invalid_json");
     // Fragmentation must not split an envelope.
     std::string wire="\0\0\0\2"s+"{}";
     std::thread fragmented([&]{for(char c:wire)check(write(a.value,&c,1)==1);});
     check(receiver.read(received));check(received.is_object());fragmented.join();
+    // Authentication continuations are correlated to both request and challenge.
+    sender.write({{"v",1},{"id","login"},{"op","auth.respond"},{"params",{{"challenge_id","c1"},{"code","123456"}}}});
+    check(receiver.challenge("login","c1")=="123456");
+    check(sender.read(received)&&received["event"]=="auth.challenge");
+    sender.write({{"v",1},{"id","wrong"},{"op","auth.respond"},{"params",{{"challenge_id","c1"},{"code","123456"}}}});
+    rejects([&]{receiver.challenge("login","c1");},"invalid_auth_continuation");
+    check(sender.read(received));
+    sender.write({{"v",1},{"id","login"},{"op","auth.respond"},{"params",{{"challenge_id","c1"},{"code",""}}}});
+    check(receiver.challenge("login","c1").empty());check(sender.read(received));
+    sender.write({{"v",1},{"id","login"},{"op","auth.respond"},{"params",{{"challenge_id","c1"},{"code","12a456"}}}});
+    rejects([&]{receiver.challenge("login","c1");},"invalid_auth_code");check(sender.read(received));
+    // Reject excessive nesting before exhausting the native stack.
+    std::string nested(70,'[');nested+="0";nested+=std::string(70,']');
+    unsigned char depth_header[4]={0,0,0,static_cast<unsigned char>(nested.size())};
+    check(write(a.value,depth_header,4)==4);
+    check(write(a.value,nested.data(),nested.size())==ssize_t(nested.size()));
+    rejects([&]{receiver.read(received);},"invalid_json");
     unsigned char large[4]={0,32,0,0};check(write(a.value,large,4)==4);
     rejects([&]{receiver.read(received);},"invalid_frame");
+    const unsigned char truncated[]={0,0,0,10,'{','}'};
+    check(write(a.value,truncated,sizeof truncated)==sizeof truncated);
+    check(shutdown(a.value,SHUT_WR)==0);
+    rejects([&]{receiver.read(received);},"transport_closed");
     Json secret={{"a","private"},{"nested",Json::array({"password"})}};wipe_json(secret);
     check(secret["a"]==""&&secret["nested"][0]=="");
     std::cout<<"common tests passed\n";

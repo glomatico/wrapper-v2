@@ -4,6 +4,8 @@
 namespace worker {
 Json Runtime::context(const std::string& adam,const std::string& uri) {
     validate_adam(adam);validate_uri(uri);
+    if(lease_expired.load())lease();
+    if(lease_expired.load())throw Error("playback_lease_unavailable",true);
     struct Reset{void* foothill;~Reset(){call<void>(names::SVFootHillSessionCtrl_resetAllContexts,foothill);}} reset{foothill};
     std::string format="com.apple.streamingkeydelivery",version="1";
     std::string server="https://play.itunes.apple.com/WebObjects/MZPlay.woa/music/fps",protocol="simplified",certificate=kFpsCert;

@@ -1,4 +1,5 @@
 #include "runtime.hpp"
+#include "library_pins.hpp"
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <arpa/inet.h>
@@ -17,6 +18,11 @@ Shared emplace_native(size_t bytes,size_t offset,const char* table,const char* c
 }
 void Runtime::initialize(const Json& params) {
     if(initialized)throw Error("already_initialized");
+    if(params.contains("request_budget")) {
+        const auto& n=params["request_budget"];
+        if(!n.is_number_integer()||n<1||n>128)throw Error("invalid_params");
+        request_budget=n.get<unsigned>();
+    }
     directory=string_param(params,"session_dir",1024);
     if(directory.front()!='/'||directory.find("/../")!=std::string::npos||directory=="/")throw Error("invalid_params");
     auto device=string_param(params,"device_info",512);
@@ -36,19 +42,20 @@ void Runtime::initialize(const Json& params) {
     if(stat(directory.c_str(),&st)||!S_ISDIR(st.st_mode))throw Error("session_directory_unavailable",false,true);
     lock_=open((directory+"/.worker.lock").c_str(),O_CREAT|O_RDWR|O_CLOEXEC|O_NOFOLLOW,0600);
     if(lock_<0||flock(lock_,LOCK_EX|LOCK_NB))throw Error("session_in_use",true,true);
+    const auto identity=sha256(reinterpret_cast<const unsigned char*>(device.data()),device.size());
+    const auto identity_path=directory+"/.worker-device";
+    Fd device_file(open(identity_path.c_str(),O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC|O_NOFOLLOW,0600));
+    if(device_file.value>=0) {
+        if(write(device_file.value,identity.data(),identity.size())!=ssize_t(identity.size())||fsync(device_file.value))throw Error("session_directory_unavailable",false,true);
+    } else if(errno==EEXIST) {
+        Fd saved(open(identity_path.c_str(),O_RDONLY|O_CLOEXEC|O_NOFOLLOW));
+        char value[65]{};
+        if(saved.value<0||read(saved.value,value,sizeof value)!=64||identity!=std::string(value,64))throw Error("session_device_mismatch",false,true);
+    } else throw Error("session_directory_unavailable",false,true);
     if(mkdir((directory+"/mpl_db").c_str(),0700)&&errno!=EEXIST)throw Error("session_directory_unavailable",false,true);
+    cached_session=stat((directory+"/mpl_db/kvs.sqlitedb").c_str(),&st)==0&&S_ISREG(st.st_mode)&&st.st_size>0;
     // Hash every ABI-bearing dependency, not just the instrumented library.
-    const std::pair<const char*,const char*> libraries[]={
-      {"libCoreLSKD.so","bf813206d382bd8b27384bd546a5b9aa730df32c8543d709756b081b619a8b3a"},
-      {"libCoreFP.so","81ba0dbd857a9e76402434ee13756051a77de91ec18d637ea4350687e0da39b3"},
-      {"libandroidappmusic.so","2fcdf31a0b3f0f8841ef63cf46efffcf9672a2cea0eef5b066c537d43e293083"},
-      {"libstoreservicescore.so","0ba169fec7b5a0f70113ab01ba6c60b893c36f9aa080797b13d3830dd3784010"},
-      {"libmediaplatform.so","cb4ab591e0ea6c74cbcbe23b616566425172efc77f83933b6aa7a3ffcc88de6d"},
-      {"libc++_shared.so","82ffc20ba230bbdd031b27853d6cfaaa27079aabe6dd478cafd9b6fa866a35c2"},
-      {"libCoreADI.so","b5b971cea0bbe828bdcfaf219fd91fc1e37cf8daee84001ef917d0b1c2b985ed"},
-      {"libCoreFoundation.so","c5727cecfa18833a6828caf2072aa6a4edf39b73752597e4de35854ea9a71ce0"}
-    };
-    for(const auto& pair:libraries)if(sha256_file(std::string("/system/lib64/")+pair.first)!=pair.second)throw Error("unsupported_library",false,true);
+    for(const auto& pair:apple_libraries)if(sha256_file(std::string("/system/lib64/")+pair.first)!=pair.second)throw Error("unsupported_library",false,true);
     for(const char* name:{"libCoreFP.so","libCoreLSKD.so","libandroidappmusic.so","libstoreservicescore.so","libmediaplatform.so"})
         if(!dlopen((std::string("/system/lib64/")+name).c_str(),RTLD_NOW|RTLD_GLOBAL))throw Error("native_load_failed",false,true);
     std::vector<const char*> servers;for(const auto& ip:dns)servers.push_back(ip.c_str());

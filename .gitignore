@@ -6,6 +6,11 @@
 /build/
 /build-*/
 /data/
+/rootfs/
+*.apk
+*.apkm
+*.so
+*.a
 /.env
 /.env.*
 !/.env.example

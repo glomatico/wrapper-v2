@@ -5,6 +5,7 @@
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/stat.h>
+#include <sys/prctl.h>
 namespace worker {
 void deadline(int){_exit(124);}
 void arm(unsigned ms){itimerval timer{};timer.it_value.tv_sec=ms/1000;timer.it_value.tv_usec=(ms%1000)*1000;setitimer(ITIMER_REAL,&timer,nullptr);}
@@ -13,6 +14,7 @@ int main() {
     using namespace worker;
     umask(0077);
     rlimit core{0,0};setrlimit(RLIMIT_CORE,&core);
+    if(prctl(PR_SET_PDEATHSIG,SIGKILL))return 70;
     signal(SIGPIPE,SIG_IGN);signal(SIGALRM,deadline);
     Fd output(dup(STDOUT_FILENO));
     if(output.value<0)return 70;
@@ -49,10 +51,11 @@ int main() {
                 else if(op=="session.login")result=session->login(params,id);
                 else if(op=="playback.get"||op=="context.get") {
                     session->require();
-                    if(operations>=128)throw Error("worker_recycle",true,true);
+                    if(operations>=runtime->request_budget)throw Error("worker_recycle",true,true);
                     auto adam=string_param(params,"adam_id",20);validate_adam(adam);
                     if(op=="playback.get"){++operations;result=runtime->playback(adam);}
                     else{auto uri=string_param(params,"key_uri",4096);validate_uri(uri);++operations;result=runtime->context(adam,uri);}
+                    session->require();
                 } else throw Error("unknown_operation");
             }
             result["operations"]=operations;

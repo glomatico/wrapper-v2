@@ -72,4 +72,18 @@ void Protocol::validate(const Json& j) {
     if(!j.contains("params")||!j["params"].is_object()) throw Error("invalid_params");
     if(j.contains("timeout_ms")&&(!j["timeout_ms"].is_number_integer()||j["timeout_ms"]<100||j["timeout_ms"]>180000)) throw Error("invalid_params");
 }
+std::string Protocol::challenge(const std::string& id,const std::string& challenge_id) {
+    write({{"v",1},{"id",id},{"event","auth.challenge"},{"challenge_id",challenge_id},{"kind","two_factor"}});
+    Json answer;JsonGuard guard{answer};
+    if(!read(answer))throw Error("transport_closed",false,true);
+    validate(answer);
+    if(answer["id"]!=id||answer["op"]!="auth.respond"||
+       string_param(answer["params"],"challenge_id",64)!=challenge_id)
+        throw Error("invalid_auth_continuation",false,true);
+    auto code=string_param(answer["params"],"code",6,true);
+    if(!code.empty()&&(code.size()!=6||code.find_first_not_of("0123456789")!=std::string::npos)) {
+        wipe(code);throw Error("invalid_auth_code",false,true);
+    }
+    return code;
+}
 }
