@@ -1,0 +1,312 @@
+//! Versioned HTTP facade. The wire contract is independent of Gamdl.
+use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Duration};
+
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use bytes::Bytes;
+use form_urlencoded::parse;
+use http_body_util::{BodyExt, Full};
+use hyper::{body::Incoming, header, Method, Request, Response, StatusCode};
+use serde_json::{json, Value};
+use subtle::ConstantTimeEq;
+use tokio::time::timeout;
+use zeroize::{Zeroize, Zeroizing};
+
+use crate::{
+    config::{Config, PROFILE},
+    error::ApiError,
+    worker::{wipe_json_value, LoginReply, Supervisor},
+};
+
+const BODY_LIMIT: usize = 16 * 1024;
+const QUERY_LIMIT: usize = 8 * 1024;
+type HttpResponse = Response<Full<Bytes>>;
+
+pub struct Api {
+    supervisor: Arc<Supervisor>,
+    token: String,
+}
+
+impl Api {
+    pub fn new(config: &Config) -> Arc<Self> {
+        Arc::new(Self {
+            supervisor: Supervisor::new(config.clone()),
+            token: config.token.clone(),
+        })
+    }
+
+    pub async fn serve(
+        self: Arc<Self>,
+        request: Request<Incoming>,
+    ) -> Result<HttpResponse, Infallible> {
+        let response = match self.handle(request).await {
+            Ok((status, payload)) => answer(status, payload),
+            Err(e) => answer(e.status, e.json()),
+        };
+        Ok(response)
+    }
+
+    async fn handle(&self, request: Request<Incoming>) -> Result<(StatusCode, Value), ApiError> {
+        let (parts, body) = request.into_parts();
+        let method = parts.method;
+        let path = parts.uri.path();
+        if path == "/health" && method == Method::GET {
+            return Ok((
+                StatusCode::OK,
+                json!({"status":"ok","version":env!("CARGO_PKG_VERSION")}),
+            ));
+        }
+        let auth = parts
+            .headers
+            .get(header::AUTHORIZATION)
+            .and_then(|h| h.to_str().ok())
+            .and_then(|h| h.strip_prefix("Bearer "));
+        let valid = auth
+            .map(|s| bool::from(self.token.as_bytes().ct_eq(s.as_bytes())))
+            .unwrap_or(false);
+        if !valid {
+            return Err(ApiError::simple("unauthorized", StatusCode::UNAUTHORIZED));
+        }
+        if parts.uri.to_string().len() > QUERY_LIMIT {
+            return Err(ApiError::bad_request("request_target_too_large"));
+        }
+        let query = parse_query(parts.uri.query().unwrap_or(""))?;
+        match (method, path) {
+            (Method::GET, "/v1/info") => Ok((
+                StatusCode::OK,
+                json!({
+                    "version":1, "context_format":"temari", "profile":PROFILE,
+                    "architecture":"x86_64",
+                    "features":["session","two_factor","playback","context"],
+                    "decryption":"client_side"
+                }),
+            )),
+            (Method::GET, "/v1/session") => self.result("session.status", json!({})).await,
+            (Method::POST, "/v1/session/restore") => {
+                empty_body(body).await?;
+                self.result("session.restore", json!({})).await
+            }
+            (Method::POST, "/v1/session/close") => {
+                empty_body(body).await?;
+                self.result("session.close", json!({})).await
+            }
+            (Method::POST, "/v1/session/login") => {
+                let mut raw = read_body(body).await?;
+                let parsed = serde_json::from_slice::<Value>(&raw)
+                    .map_err(|_| ApiError::bad_request("invalid_json"));
+                raw.zeroize();
+                let mut parsed = parsed?;
+                let username = field(&parsed, "username", 320, false)
+                    .map(|value| Zeroizing::new(value.to_string()));
+                let password = field(&parsed, "password", 4096, false)
+                    .map(|value| Zeroizing::new(value.to_string()));
+                wipe_json_value(&mut parsed);
+                let username = username?;
+                let password = password?;
+                // Never log username, password or a request body.
+                login_response(self.supervisor.login(username, password).await?)
+            }
+            (Method::POST, "/v1/session/challenge") => {
+                let mut raw = read_body(body).await?;
+                let parsed = serde_json::from_slice::<Value>(&raw)
+                    .map_err(|_| ApiError::bad_request("invalid_json"));
+                raw.zeroize();
+                let mut parsed = parsed?;
+                let id = field(&parsed, "challenge_id", 64, false).map(str::to_string);
+                let code =
+                    field(&parsed, "code", 6, true).map(|value| Zeroizing::new(value.to_string()));
+                wipe_json_value(&mut parsed);
+                let id = id?;
+                let code = code?;
+                if !code.is_empty()
+                    && (code.len() != 6 || !code.bytes().all(|b| b.is_ascii_digit()))
+                {
+                    return Err(ApiError::bad_request("invalid_auth_code"));
+                }
+                login_response(self.supervisor.challenge(&id, code).await?)
+            }
+            (Method::GET, "/v1/playback") => {
+                let adam_id = get_param(&query, "adam_id")?;
+                validate_adam(adam_id)?;
+                self.result("playback.get", json!({"adam_id":adam_id}))
+                    .await
+            }
+            (Method::GET, "/v1/context") | (Method::GET, "/key") => {
+                let alias = path == "/key";
+                let adam_id = get_param(&query, if alias { "adamId" } else { "adam_id" })?;
+                let key_uri = get_param(&query, if alias { "uri" } else { "key_uri" })?;
+                validate_adam(adam_id)?;
+                validate_key_uri(key_uri)?;
+                let mut worker_result = self
+                    .supervisor
+                    .call("context.get", json!({"adam_id":adam_id,"key_uri":key_uri}))
+                    .await?;
+                let mut context = worker_result
+                    .as_object_mut()
+                    .and_then(|map| map.remove("context"))
+                    .ok_or_else(|| ApiError::worker_unavailable("invalid_context"))?;
+                let valid = context.get("profile").and_then(Value::as_str) == Some(PROFILE)
+                    && context.get("ctx").and_then(Value::as_str).is_some_and(|s| {
+                        STANDARD
+                            .decode(s)
+                            .map(Zeroizing::new)
+                            .is_ok_and(|decoded| decoded.len() == 0x8000)
+                    })
+                    && context
+                        .get("state")
+                        .and_then(Value::as_str)
+                        .is_some_and(|s| {
+                            STANDARD
+                                .decode(s)
+                                .map(Zeroizing::new)
+                                .is_ok_and(|decoded| decoded.len() == 0x800)
+                        })
+                    && context
+                        .get("bl")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|n| n <= 255)
+                    && context
+                        .get("r9b")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|n| n <= 255);
+                if !valid {
+                    wipe_json_value(&mut context);
+                    return Err(ApiError::worker_unavailable("invalid_context"));
+                }
+                Ok((StatusCode::OK, context))
+            }
+            _ => Err(ApiError::simple("not_found", StatusCode::NOT_FOUND)),
+        }
+    }
+
+    async fn result(
+        &self,
+        operation: &str,
+        params: Value,
+    ) -> Result<(StatusCode, Value), ApiError> {
+        Ok((
+            StatusCode::OK,
+            self.supervisor.call(operation, params).await?,
+        ))
+    }
+}
+
+fn answer(status: StatusCode, mut payload: Value) -> HttpResponse {
+    let bytes = serde_json::to_vec(&payload)
+        .unwrap_or_else(|_| b"{\"error\":{\"code\":\"internal_error\"}}".to_vec());
+    wipe_json_value(&mut payload);
+    Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-store")
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        .header("content-security-policy", "default-src 'none'")
+        .body(Full::new(Bytes::from(bytes)))
+        .expect("static response headers")
+}
+
+fn login_response(value: LoginReply) -> Result<(StatusCode, Value), ApiError> {
+    Ok(match value {
+        LoginReply::Finished(session) => (StatusCode::OK, session),
+        LoginReply::Challenge { id, kind } => (
+            StatusCode::ACCEPTED,
+            json!({"status":"challenge","kind":kind,"challenge_id":id}),
+        ),
+    })
+}
+
+fn parse_query(query: &str) -> Result<HashMap<String, String>, ApiError> {
+    if query.len() > QUERY_LIMIT {
+        return Err(ApiError::bad_request("request_target_too_large"));
+    }
+    let mut params = HashMap::new();
+    for (key, value) in parse(query.as_bytes()) {
+        if params
+            .insert(key.into_owned(), value.into_owned())
+            .is_some()
+        {
+            return Err(ApiError::bad_request("duplicate_parameter"));
+        }
+    }
+    Ok(params)
+}
+
+fn get_param<'a>(params: &'a HashMap<String, String>, name: &str) -> Result<&'a str, ApiError> {
+    params
+        .get(name)
+        .map(String::as_str)
+        .ok_or_else(|| ApiError::bad_request("missing_parameter"))
+}
+
+fn field<'a>(json: &'a Value, name: &str, max: usize, empty: bool) -> Result<&'a str, ApiError> {
+    let value = json
+        .get(name)
+        .and_then(Value::as_str)
+        .ok_or_else(|| ApiError::bad_request("invalid_params"))?;
+    if value.len() > max || (!empty && value.is_empty()) || value.contains('\0') {
+        return Err(ApiError::bad_request("invalid_params"));
+    }
+    Ok(value)
+}
+
+fn validate_adam(adam: &str) -> Result<(), ApiError> {
+    if adam.is_empty() || adam.len() > 20 || !adam.bytes().all(|c| c.is_ascii_digit()) {
+        return Err(ApiError::bad_request("invalid_adam_id"));
+    }
+    Ok(())
+}
+
+fn validate_key_uri(uri: &str) -> Result<(), ApiError> {
+    if !uri.starts_with("skd://")
+        || uri.len() <= 6
+        || uri.len() > 4096
+        || uri.bytes().any(|c| c <= 32 || c == 127)
+    {
+        return Err(ApiError::bad_request("invalid_key_uri"));
+    }
+    Ok(())
+}
+
+async fn read_body(mut body: Incoming) -> Result<Vec<u8>, ApiError> {
+    let mut bytes = Vec::new();
+    timeout(Duration::from_secs(10), async {
+        while let Some(frame) = body.frame().await {
+            let frame = frame.map_err(|_| ApiError::bad_request("invalid_body"))?;
+            if let Some(data) = frame.data_ref() {
+                if bytes.len().saturating_add(data.len()) > BODY_LIMIT {
+                    return Err(ApiError::simple(
+                        "body_too_large",
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                    ));
+                }
+                bytes.extend_from_slice(data);
+            }
+        }
+        Ok(bytes)
+    })
+    .await
+    .map_err(|_| ApiError::bad_request("body_timeout"))?
+}
+
+async fn empty_body(body: Incoming) -> Result<(), ApiError> {
+    if !read_body(body).await?.is_empty() {
+        return Err(ApiError::bad_request("unexpected_body"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn strict_query_and_sample_uri_validation() {
+        assert!(parse_query("adam_id=1&adam_id=2").is_err());
+        assert_eq!(
+            get_param(&parse_query("uri=skd%3A%2F%2Fabc").unwrap(), "uri").unwrap(),
+            "skd://abc"
+        );
+        assert!(validate_adam("1&redirect=2").is_err());
+        assert!(validate_key_uri("https://example.org/").is_err());
+        assert!(validate_key_uri("skd://bad\n").is_err());
+        assert!(validate_key_uri("skd://valid-key").is_ok());
+    }
+}

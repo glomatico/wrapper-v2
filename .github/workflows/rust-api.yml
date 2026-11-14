@@ -1,0 +1,31 @@
+name: Rust API
+
+on:
+  push:
+    branches: [tamari]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Rust formatting
+        run: cargo fmt --check
+      - name: Rust lint
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Rust unit tests
+        run: cargo test --locked
+      - name: Build HTTP server for integration tests
+        run: cargo build --locked
+      - name: Synthetic HTTP worker and APK staging tests
+        run: python -B -m unittest discover -s tests -p 'test_*.py' -v
