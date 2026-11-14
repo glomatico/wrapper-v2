@@ -1,12 +1,19 @@
+# Local-only project knowledge, debugging, credentials and private test inputs.
+/.local/
+
+# Build outputs and local runtime state.
 /target/
-
-# Runtime/session data mounted by compose.yaml.
+/build/
+/build-*/
 /data/
+/.env
+/.env.*
+!/.env.example
 
-# Generated chroot contents. Keep placeholders tracked, but do not commit
-# staged Android system files or extracted Apple Music libraries.
-/rootfs/system/bin/*
-!/rootfs/system/bin/.gitkeep
-/rootfs/system/lib64/*
-!/rootfs/system/lib64/.gitkeep
-/rootfs/system/usr/
+# Editors and temporary files.
+/.idea/
+/.vscode/
+__pycache__/
+*.pyc
+*.swp
+.DS_Store

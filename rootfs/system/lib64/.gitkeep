@@ -1,3 +1,0 @@
-# This directory holds Apple Music's native libraries, extracted from a pinned
-# APK by tools/extract-libs.sh. Files are pinned by SHA-256 in LIBS_VERSION.json
-# and never committed.

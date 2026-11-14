@@ -1,4 +1,0 @@
-# This directory holds the wrapper's chroot-bin contents:
-#   - main         (the daemon, cross-compiled for Android)
-#   - linker64     (Android dynamic linker, sourced from Android system image)
-# Files are produced by the build and never committed.
