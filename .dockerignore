@@ -6,6 +6,7 @@ build/
 build-*/
 cmake-build-*/
 data/
+.env
 
 *.apk
 *.apkm
