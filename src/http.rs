@@ -11,8 +11,9 @@ use tokio::time::timeout;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
-    config::{Config, PROFILE},
+    config::Config,
     error::ApiError,
+    profile::RuntimeProfile,
     worker::{wipe_json_value, LoginReply, Supervisor},
 };
 
@@ -22,12 +23,14 @@ type HttpResponse = Response<Full<Bytes>>;
 
 pub struct Api {
     supervisor: Arc<Supervisor>,
+    profile: RuntimeProfile,
 }
 
 impl Api {
     pub fn new(config: &Config) -> Arc<Self> {
         Arc::new(Self {
             supervisor: Supervisor::new(config.clone()),
+            profile: config.profile.clone(),
         })
     }
 
@@ -61,9 +64,13 @@ impl Api {
                 StatusCode::OK,
                 json!({
                     "version":env!("CARGO_PKG_VERSION"), "protocol_version":1,
-                    "context_format":"temari", "profile":PROFILE,
-                    "architecture":"x86_64",
-                    "features":["session","two_factor","credentials","playback","context"],
+                    "context_format":"temari", "profile":self.profile.profile,
+                    "architecture":self.profile.architecture,
+                    "linux_architecture":self.profile.linux_architecture,
+                    "context_supported":self.profile.context_supported,
+                    "features":if self.profile.context_supported {
+                        vec!["session","two_factor","credentials","playback","context"]
+                    } else { vec!["session","two_factor","credentials","playback"] },
                     "decryption":"client_side"
                 }),
             )),
@@ -134,7 +141,9 @@ impl Api {
                     .as_object_mut()
                     .and_then(|map| map.remove("context"))
                     .ok_or_else(|| ApiError::worker_unavailable("invalid_context"))?;
-                let valid = context.get("profile").and_then(Value::as_str) == Some(PROFILE)
+                let valid = self.profile.context_supported
+                    && context.get("profile").and_then(Value::as_str)
+                        == self.profile.context_profile.as_deref()
                     && context.get("ctx").and_then(Value::as_str).is_some_and(|s| {
                         STANDARD
                             .decode(s)

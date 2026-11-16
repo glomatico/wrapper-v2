@@ -2,6 +2,7 @@
 #include "common.hpp"
 #include "protocol.hpp"
 #include "symbols.hpp"
+#include "abi.hpp"
 #include <memory>
 #include <functional>
 #include <dlfcn.h>
@@ -26,7 +27,7 @@ Shared emplace_native(size_t bytes,size_t offset,const char* vtable,const char* 
 class Runtime {
     int lock_=-1;
     Shared config_;
-    alignas(16) std::array<unsigned char,88> guid_config_{},request_config_{};
+    ConfigurationResult guid_config_{},request_config_{};
     alignas(16) std::array<unsigned char,4096> lease_{};
     std::function<void(const int&)> lease_end_;
     std::function<void(const Shared&)> lease_error_;

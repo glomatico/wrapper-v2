@@ -43,7 +43,8 @@ int main() {
             if(op=="shutdown"||op=="session.close"){result={{"state","closed"}};stop=true;}
             else if(op=="initialize") {
                 runtime->initialize(params);session->attach();install_capture();
-                result={{"protocol",1},{"profile",profile},{"session",session->status()}};
+                result={{"protocol",1},{"profile",profile},{"architecture",architecture},
+                        {"context_supported",context_supported},{"session",session->status()}};
             } else {
                 if(!runtime->initialized)throw Error("not_initialized");
                 if(op=="session.status")result=session->status();

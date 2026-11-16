@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ServerContract(unittest.TestCase):
+    architecture = "x86_64"
     @classmethod
     def setUpClass(cls):
         binary = ROOT / "target/debug/wrapperd"
@@ -31,11 +32,18 @@ class ServerContract(unittest.TestCase):
             shlex.quote(str(ROOT / "tests/mock_worker.py")) + ' "$@"\n'
         )
         cls.launcher.chmod(0o700)
+        elf = bytearray(64)
+        elf[:6] = b"\x7fELF\x02\x01"
+        cls.profile = json.loads((ROOT/f"profiles/apple-music-1109-{cls.architecture}.json").read_text())
+        elf[18:20] = cls.profile["elf_machine"].to_bytes(2,"little")
+        worker = directory/"system/bin/apple-music-worker"
+        worker.parent.mkdir(parents=True)
+        worker.write_bytes(elf)
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             cls.port = sock.getsockname()[1]
         env = dict(os.environ,
-                   WRAPPER_HOST="127.0.0.1", WRAPPER_PORT=str(cls.port),
+                   WRAPPER_HOST="127.0.0.1", WRAPPER_PORT=str(cls.port), WRAPPER_ARCH=cls.architecture,
                    WRAPPER_LAUNCHER=str(cls.launcher),
                    WRAPPER_ROOTFS=str(directory),
                    WRAPPER_DEVICE_INFO="a/b/c/d/e/f/g/h/i")
@@ -92,6 +100,10 @@ class ServerContract(unittest.TestCase):
         self.assertEqual(info["decryption"], "client_side")
         self.assertEqual(info["version"], "1.0.0")
         self.assertEqual(info["protocol_version"], 1)
+        self.assertEqual(info["architecture"], self.architecture)
+        self.assertEqual(info["profile"], self.profile["profile"])
+        self.assertEqual(info["context_supported"], self.profile["context_supported"])
+        self.assertEqual("context" in info["features"], self.profile["context_supported"])
         self.assertIn("credentials", info["features"])
         self.assertEqual(self.request("GET", "/v1/info")[0], 404)
         self.assertEqual(self.request("GET", "/v1/session")[0], 404)
@@ -115,6 +127,13 @@ class ServerContract(unittest.TestCase):
         self.assertEqual(playback["songList"][0]["id"], "12345")
         query = urlencode({"adam_id": "12345", "key_uri": "skd://example/test?x=1"})
         status, context = self.request("GET", "/context?" + query)
+        if not self.profile["context_supported"]:
+            self.assertEqual(status,502)
+            self.assertEqual(context["error"]["code"],"unsupported_capture_profile")
+            status,alias=self.request("GET","/key?"+urlencode({"adamId":"12345","uri":"skd://example/test"}))
+            self.assertEqual(alias["error"]["code"],"unsupported_capture_profile")
+            self.assertEqual(self.request("POST", "/decrypt", {"samples":[]})[0], 404)
+            return
         self.assertEqual(status, 200)
         self.assertIn("ctx", context)
         self.assertTrue(context["profile"].startswith("apple-music-"))
@@ -162,6 +181,9 @@ class ServerContract(unittest.TestCase):
         self.assertEqual(credentials["dev_token"], "mock-developer-token")
         self.assertEqual(credentials["music_user_token"], "mock-media-user-token")
 
+
+class ArmServerContract(ServerContract):
+    architecture = "arm64-v8a"
 
 if __name__ == "__main__":
     unittest.main()

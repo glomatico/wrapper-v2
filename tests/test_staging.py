@@ -6,37 +6,42 @@ import tempfile
 import unittest
 import warnings
 import zipfile
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
 spec = importlib.util.spec_from_file_location("stage", ROOT / "tools/prepare_rootfs.py")
 stage = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stage)
 
 
 class StagingTests(unittest.TestCase):
-    def fixture(self, directory, *, arch=62, corrupt=False, duplicate=False, manifest=b"synthetic"):
+    def fixture(self, directory, *, abi="x86_64", arch=None, corrupt=False, duplicate=False, manifest=b"synthetic"):
+        profile = stage.load_profile(abi)
+        if arch is None:
+            arch = profile["elf_machine"]
         elf = bytearray(64)
         elf[:6] = b"\x7fELF\x02\x01"
         elf[18:20] = arch.to_bytes(2, "little")
-        pins = dict(stage.PINS, split_manifest_sha256=stage.digest(b"synthetic"),
+        pins = dict(profile, split_manifest_sha256=stage.digest(b"synthetic"),
                     apple_libraries={"libTest.so": stage.digest(elf)})
         path = Path(directory) / "fixture.apk"
         with zipfile.ZipFile(path, "w") as archive:
             archive.writestr("AndroidManifest.xml", manifest)
-            archive.writestr("lib/x86_64/libTest.so", bytes(elf) + (b"bad" if corrupt else b""))
+            archive.writestr(f"lib/{abi}/libTest.so", bytes(elf) + (b"bad" if corrupt else b""))
             if duplicate:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", UserWarning)
-                    archive.writestr("lib/x86_64/libTest.so", elf)
+                    archive.writestr(f"lib/{abi}/libTest.so", elf)
         return path, pins
 
     def test_verified_library(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path, pins = self.fixture(directory)
-            with patch.object(stage, "PINS", pins):
-                self.assertEqual(len(stage.extract_apple(path)["libTest.so"]), 64)
+        for abi in ("x86_64", "arm64-v8a"):
+            with self.subTest(abi=abi), tempfile.TemporaryDirectory() as directory:
+                path, pins = self.fixture(directory, abi=abi)
+                self.assertEqual(len(stage.extract_apple(path,pins)["libTest.so"]), 64)
 
     def test_wrong_architecture(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -53,7 +58,7 @@ class StagingTests(unittest.TestCase):
     def test_manifest_mismatch(self):
         with tempfile.TemporaryDirectory() as directory:
             path, pins = self.fixture(directory, manifest=b"unknown build")
-            with patch.object(stage, "PINS", pins), self.assertRaisesRegex(ValueError, "APK build"):
+            with patch.object(stage, "PINS", pins), self.assertRaisesRegex(ValueError, "APK architecture/build"):
                 stage.extract_apple(path)
 
     def test_duplicate_library(self):
@@ -73,9 +78,14 @@ class StagingTests(unittest.TestCase):
 
     def test_manifest_matches_runtime(self):
         import re
-        text = (ROOT / "native/library_pins.hpp").read_text()
-        pins = dict(re.findall(r'\{"([^"]+)","([0-9a-f]{64})"\}', text))
-        self.assertEqual(pins, stage.PINS["apple_libraries"])
+        import subprocess
+        for abi in ("x86_64", "arm64-v8a"):
+            with self.subTest(abi=abi), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory)/"worker_profile.hpp"
+                subprocess.run([sys.executable,str(ROOT/"tools/generate_native_profile.py"),
+                                "--arch",abi,"--output",str(output)],check=True)
+                pins = dict(re.findall(r'\{"([^"]+)","([0-9a-f]{64})"\}', output.read_text()))
+                self.assertEqual(pins, stage.load_profile(abi)["apple_libraries"])
 
     def test_capture_contract(self):
         import re

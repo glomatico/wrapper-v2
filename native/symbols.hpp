@@ -1,4 +1,5 @@
-// Exact exported names from the supplied build 1109 ELF symbol tables.
+// Build 1109 names verified against all 18 libraries in BOTH APK ABI splits.
+// Calling conventions and capture layouts are not inferred from equal names.
 #pragma once
 namespace worker::names {
 inline constexpr const char* RequestContextConfig_ctor="_ZN17storeservicescore20RequestContextConfigC2Ev";

@@ -1,6 +1,7 @@
 mod config;
 mod error;
 mod http;
+mod profile;
 mod worker;
 
 use std::sync::Arc;

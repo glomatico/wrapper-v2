@@ -59,7 +59,7 @@ Json Runtime::playback(const std::string& adam) {
     auto error=call<Shared*>(names::PurchaseResponse_error,response->get());
     if(error&&*error)throw Error("playback_failed",true);
     std::vector<Shared> items;
-    call<void>(names::PurchaseResponse_items,&items,response->get());
+    items=call<std::vector<Shared>>(names::PurchaseResponse_items,response->get());
     if(items.empty()||items.size()>128)throw Error("playback_unavailable");
     Json songs=Json::array();size_t budget=65536;
     for(const auto& item:items) {

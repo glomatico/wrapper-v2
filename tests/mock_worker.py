@@ -6,7 +6,11 @@ import os
 import struct
 import sys
 
-PROFILE = "apple-music-3.6.0.1109-x86_64-research-v1"
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"tools"))
+from architecture import load_profile
+profile = load_profile(os.environ.get("WRAPPER_ARCH", "x86_64"))
+PROFILE = profile["profile"]
 session = "logged_out"
 
 
@@ -54,7 +58,9 @@ def main():
         op = req["op"]
         params = req["params"]
         if op == "initialize":
-            reply(id_, {"profile": PROFILE, "protocol": 1, "session": {"state": session}})
+            reply(id_, {"profile": PROFILE, "architecture":profile["architecture"],
+                        "context_supported":profile["context_supported"],
+                        "protocol": 1, "session": {"state": session}})
         elif op == "session.status":
             reply(id_, {"state": session, "storefront": "143441"})
         elif op == "session.credentials":
@@ -90,7 +96,9 @@ def main():
             else:
                 reply(id_, {"songList": [{"id": params["adam_id"], "codec": "alac"}]})
         elif op == "context.get":
-            if session != "authenticated":
+            if not profile["context_supported"]:
+                reply(id_,error="unsupported_capture_profile")
+            elif session != "authenticated":
                 reply(id_, error="authentication_required")
             else:
                 invalid = params["adam_id"] == "6666"

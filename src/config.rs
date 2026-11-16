@@ -1,12 +1,13 @@
 use std::{env, net::IpAddr, path::PathBuf};
 
 use crate::error::ApiError;
+use crate::profile::RuntimeProfile;
 
-pub const PROFILE: &str = "apple-music-3.6.0.1109-x86_64-research-v1";
 const DEFAULT_SESSION_DIR: &str = "/data/data/com.apple.android.music/files";
 
 #[derive(Clone)]
 pub struct Config {
+    pub profile: RuntimeProfile,
     pub host: IpAddr,
     pub port: u16,
     pub launcher: PathBuf,
@@ -18,6 +19,9 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self, ApiError> {
+        let profile = RuntimeProfile::select(
+            &env::var("WRAPPER_ARCH").unwrap_or_else(|_| std::env::consts::ARCH.to_string()),
+        )?;
         let host = env::var("WRAPPER_HOST")
             .unwrap_or_else(|_| "127.0.0.1".into())
             .parse()
@@ -29,14 +33,16 @@ impl Config {
         if port == 0 {
             return Err(ApiError::bad_config("WRAPPER_PORT"));
         }
-        let launcher =
-            env::var("WRAPPER_LAUNCHER").unwrap_or_else(|_| "./build/host/worker-launch".into());
-        let rootfs = env::var("WRAPPER_ROOTFS").unwrap_or_else(|_| "./build/rootfs".into());
+        let launcher = env::var("WRAPPER_LAUNCHER")
+            .unwrap_or_else(|_| format!("./build/{}/host/worker-launch", profile.architecture));
+        let rootfs = env::var("WRAPPER_ROOTFS")
+            .unwrap_or_else(|_| format!("./build/{}/rootfs", profile.architecture));
         let rootfs =
             std::fs::canonicalize(&rootfs).map_err(|_| ApiError::bad_config("WRAPPER_ROOTFS"))?;
         if !rootfs.is_dir() {
             return Err(ApiError::bad_config("WRAPPER_ROOTFS"));
         }
+        profile.validate_rootfs(&rootfs)?;
         let launcher = std::fs::canonicalize(&launcher)
             .map_err(|_| ApiError::bad_config("WRAPPER_LAUNCHER"))?;
         let device_info = env::var("WRAPPER_DEVICE_INFO")
@@ -62,6 +68,7 @@ impl Config {
             return Err(ApiError::bad_config("WRAPPER_DNS"));
         }
         Ok(Self {
+            profile,
             host,
             port,
             launcher,

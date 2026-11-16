@@ -18,6 +18,9 @@ Shared emplace_native(size_t bytes,size_t offset,const char* table,const char* c
 }
 void Runtime::initialize(const Json& params) {
     if(initialized)throw Error("already_initialized");
+    if((params.contains("architecture")&&params["architecture"]!=architecture)||
+       (params.contains("profile")&&params["profile"]!=profile))
+        throw Error("unsupported_worker_profile",false,true);
     if(params.contains("request_budget")) {
         const auto& n=params["request_budget"];
         if(!n.is_number_integer()||n<1||n>128)throw Error("invalid_params");
@@ -61,12 +64,12 @@ void Runtime::initialize(const Json& params) {
     std::vector<const char*> servers;for(const auto& ip:dns)servers.push_back(ip.c_str());
     call<void>(names::resolv,0u,servers.data(),int(servers.size()),".");
     call<void>(names::FootHillConfig_config,&parts[8]);
-    call<void>(names::DeviceGUID_instance,&guid);
+    guid=call<Shared>(names::DeviceGUID_instance);
     if(!guid)throw Error("native_init_failed",false,true);
     std::string empty;unsigned kind=29;bool yes=true;
-    call<void>(names::DeviceGUID_configure,guid_config_.data(),guid.get(),&parts[8],&empty,&kind,&yes);
+    guid_config_=call<ConfigurationResult>(names::DeviceGUID_configure,guid.get(),&parts[8],&empty,&kind,&yes);
     std::string db=directory+"/mpl_db";
-    call<void>(names::make_shared_RequestContext,&request,&db);
+    request=call<Shared>(names::make_shared_RequestContext,&db);
     if(!request)throw Error("native_init_failed",false,true);
     auto destructor=symbol<void(*)(void*)>(names::RequestContextConfig_dtor);
     void* config=::operator new(2048);std::memset(config,0,2048);
@@ -76,9 +79,9 @@ void Runtime::initialize(const Json& params) {
     const char* setters[]={names::RCC_setClientIdentifier,names::RCC_setVersionIdentifier,names::RCC_setPlatformIdentifier,names::RCC_setProductVersion,names::RCC_setDeviceModel,names::RCC_setBuildVersion,names::RCC_setLocaleIdentifier,names::RCC_setLanguageIdentifier};
     for(unsigned i=0;i<8;++i)call<void>(setters[i],config,&parts[i]);
     call<void>(names::RequestContextManager_configure,&request);
-    call<void>(names::RequestContext_init,request_config_.data(),request.get(),&config_);
+    request_config_=call<ConfigurationResult>(names::RequestContext_init,request.get(),&config_);
     call<void>(names::RequestContext_setFairPlayDirectoryPath,request.get(),&directory);
-    call<void>(names::make_shared_AndroidPresentationInterface,&presentation);
+    presentation=call<Shared>(names::make_shared_AndroidPresentationInterface);
     if(!presentation)throw Error("native_init_failed",false,true);
     call<void>(names::RequestContext_setPresentationInterface,request.get(),&presentation);
     foothill=call<void*>(names::SVFootHillSessionCtrl_instance);

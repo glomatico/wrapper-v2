@@ -15,10 +15,7 @@ use tokio::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::{
-    config::{Config, PROFILE},
-    error::ApiError,
-};
+use crate::{config::Config, error::ApiError};
 
 // Best-effort wiping for owned JSON values that may contain credentials,
 // signed URLs or context material. Allocator/internal serde copies cannot be
@@ -317,6 +314,8 @@ impl Controller {
             "session_dir":config.session_dir,
             "device_info":config.device_info,
             "dns":config.dns,
+            "architecture":config.profile.architecture,
+            "profile":config.profile.profile,
         });
         let outcome = timeout(COMMAND_LIMIT, async {
             self.send(&id, "initialize", params, 120000).await?;
@@ -326,7 +325,12 @@ impl Controller {
         .map_err(|_| ApiError::worker_unavailable("worker_timeout"))?;
         match outcome? {
             Packet::Success(result)
-                if result.get("profile").and_then(Value::as_str) == Some(PROFILE)
+                if result.get("profile").and_then(Value::as_str)
+                    == Some(config.profile.profile.as_str())
+                    && result.get("architecture").and_then(Value::as_str)
+                        == Some(config.profile.architecture.as_str())
+                    && result.get("context_supported").and_then(Value::as_bool)
+                        == Some(config.profile.context_supported)
                     && result.get("protocol").and_then(Value::as_u64) == Some(1) =>
             {
                 Ok(())

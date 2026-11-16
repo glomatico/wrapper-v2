@@ -110,5 +110,13 @@
     "lib64/libwilhelm.so": "ad6cbba01c6fb9cdf6d33082441ba1a04f6e4c030df6026403f59a1c93e8e6e2",
     "lib64/libz.so": "e953e12985e0d756445e49ace84bd7c0e25c48616d3a572b0037a4c920b38e22",
     "usr/share/zoneinfo/tzdata": "586f372496315b1563e62a1a28d18adf65dea5a7b7453d7e0a91df9dfc2c8482"
-  }
+  },
+  "linux_architecture": "x86_64",
+  "rust_target": "x86_64-unknown-linux-gnu",
+  "docker_platform": "linux/amd64",
+  "elf_machine": 62,
+  "apk_split": "split_config.x86_64.apk",
+  "android_api": 21,
+  "context_profile": "apple-music-3.6.0.1109-x86_64-research-v1",
+  "context_supported": true
 }

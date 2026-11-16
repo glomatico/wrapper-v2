@@ -4,9 +4,9 @@
 #include <string>
 #include <array>
 #include <unistd.h>
+#include "worker_profile.hpp"
 namespace worker {
 using Json = nlohmann::json;
-inline constexpr const char* profile = "apple-music-3.6.0.1109-x86_64-research-v1";
 inline void wipe(void* p, size_t n) { auto b=static_cast<volatile unsigned char*>(p); while(n--) *b++=0; }
 inline void wipe(std::string& s) { if(!s.empty()) wipe(&s[0],s.size()); s.clear(); }
 void wipe_json(Json& j);
