@@ -118,5 +118,10 @@
   "apk_split": "split_config.x86_64.apk",
   "android_api": 21,
   "context_profile": "apple-music-3.6.0.1109-x86_64-research-v1",
-  "context_supported": true
+  "context_supported": true,
+  "context_contract": {
+    "ctx_bytes": 32768,
+    "state_bytes": 2048,
+    "byte_fields": ["bl", "r9b"]
+  }
 }

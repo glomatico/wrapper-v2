@@ -9,6 +9,14 @@
 #include <cstring>
 namespace worker {
 namespace {
+struct Capture {
+    std::array<unsigned char,0x8000> ctx{};
+    std::array<unsigned char,0x800> state{};
+    unsigned char bl=0,r9b=0;
+    ~Capture(){wipe(ctx.data(),ctx.size());wipe(state.data(),state.size());bl=r9b=0;}
+    Capture()=default;Capture(const Capture&)=delete;Capture& operator=(const Capture&)=delete;
+    Json json()const{return {{"profile",context_profile},{"ctx",base64(ctx.data(),ctx.size())},{"state",base64(state.data(),state.size())},{"bl",bl},{"r9b",r9b}};}
+};
 constexpr uintptr_t entry=0x107070;
 constexpr unsigned char prefix[]={0x44,0x88,0x8d,0x78,0xfd,0xff,0xff,0x4c,0x89,0xad,0x40,0xfd,0xff,0xff};
 static_assert(sizeof(capture_offsets)/sizeof(*capture_offsets)==754,"Capture layout changed");
@@ -46,7 +54,8 @@ void install_capture() {
     if(DobbyInstrument(reinterpret_cast<void*>(image.base+entry),callback))throw Error("capture_hook_failed",false,true);
     installed=true;
 }
-void capture(void* engine,Decrypt decrypt,Capture& output) {
+Json capture(void* engine,Decrypt decrypt) {
+    Capture output;
     if(!installed||!engine||!decrypt||active)throw Error("capture_unavailable",false,true);
     Fd memory(open("/proc/self/mem",O_RDONLY|O_CLOEXEC));
     if(memory.value<0)throw Error("capture_memory_unavailable",false,true);
@@ -57,5 +66,6 @@ void capture(void* engine,Decrypt decrypt,Capture& output) {
     auto status=decrypt(engine,5,dummy.data(),dummy.data(),dummy.size());
     wipe(dummy.data(),dummy.size());
     if(status<0||!window.done)throw Error("context_capture_failed",false,true);
+    return output.json();
 }
 }

@@ -2,13 +2,14 @@
 # The build context deliberately excludes APKs, Android libraries, rootfs,
 # cached sessions, and other user-private files.
 FROM debian:13.2
+ARG TARGETARCH
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libcap2-bin \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --chmod=0755 target/release/wrapperd /usr/local/bin/wrapperd
-COPY --chmod=0755 build/host/worker-launch /usr/local/bin/worker-launch
+COPY --chmod=0755 build/package/${TARGETARCH}/wrapperd /usr/local/bin/wrapperd
+COPY --chmod=0755 build/package/${TARGETARCH}/worker-launch /usr/local/bin/worker-launch
 
 # Only the launcher needs filesystem namespace/chroot capabilities. The HTTP
 # server runs as an ordinary UID; successful exec of the native worker drops

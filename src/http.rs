@@ -1,7 +1,6 @@
 //! Unversioned HTTP facade for Wrapper-v2 1.0.0; native IPC uses protocol v1.
 use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Duration};
 
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use bytes::Bytes;
 use form_urlencoded::parse;
 use http_body_util::{BodyExt, Full};
@@ -141,33 +140,7 @@ impl Api {
                     .as_object_mut()
                     .and_then(|map| map.remove("context"))
                     .ok_or_else(|| ApiError::worker_unavailable("invalid_context"))?;
-                let valid = self.profile.context_supported
-                    && context.get("profile").and_then(Value::as_str)
-                        == self.profile.context_profile.as_deref()
-                    && context.get("ctx").and_then(Value::as_str).is_some_and(|s| {
-                        STANDARD
-                            .decode(s)
-                            .map(Zeroizing::new)
-                            .is_ok_and(|decoded| decoded.len() == 0x8000)
-                    })
-                    && context
-                        .get("state")
-                        .and_then(Value::as_str)
-                        .is_some_and(|s| {
-                            STANDARD
-                                .decode(s)
-                                .map(Zeroizing::new)
-                                .is_ok_and(|decoded| decoded.len() == 0x800)
-                        })
-                    && context
-                        .get("bl")
-                        .and_then(Value::as_u64)
-                        .is_some_and(|n| n <= 255)
-                    && context
-                        .get("r9b")
-                        .and_then(Value::as_u64)
-                        .is_some_and(|n| n <= 255);
-                if !valid {
+                if !self.profile.validate_context(&context) {
                     wipe_json_value(&mut context);
                     return Err(ApiError::worker_unavailable("invalid_context"));
                 }

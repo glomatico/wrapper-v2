@@ -20,7 +20,6 @@ Json Runtime::context(const std::string& adam,const std::string& uri) {
     auto handle=call<void**>(names::SVFootHillPContext_kdContext,context.get());
     if(!handle||!*handle)throw Error("context_acquisition_failed",true);
     void* engine=nullptr;std::memcpy(&engine,*handle,sizeof engine);
-    Capture captured;capture(engine,symbol<Decrypt>(names::fp_sample_decrypt),captured);
-    return {{"context",captured.json()}};
+    return {{"context",capture(engine,symbol<Decrypt>(names::fp_sample_decrypt))}};
 }
 }

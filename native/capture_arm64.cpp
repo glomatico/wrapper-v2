@@ -6,7 +6,7 @@ namespace worker {
 // The ARM64 native runtime is separate from its as-yet unverified capture
 // contract. Never install x86 hooks or mislabel ARM native state as x86 state.
 void install_capture() {}
-void capture(void*,Decrypt,Capture&) {
+Json capture(void*,Decrypt) {
     throw Error("unsupported_capture_profile");
 }
 }

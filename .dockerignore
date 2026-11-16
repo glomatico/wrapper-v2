@@ -1,9 +1,9 @@
 # The Docker build context is intentionally *only* these two binaries.
 # Never send user-provided APKs, credentials, sessions, or rootfs to the daemon.
 **
-!target/
-!target/release/
-!target/release/wrapperd
 !build/
-!build/host/
-!build/host/worker-launch
+!build/package/
+!build/package/amd64/
+!build/package/arm64/
+!build/package/*/wrapperd
+!build/package/*/worker-launch

@@ -1,0 +1,12 @@
+# Optional local builder. Supply an existing image containing NDK r23b and the
+# pinned dependency checkout cache. Only toolchains/source dependencies are copied.
+ARG TOOLCHAIN_IMAGE=wrapper-v2:temari-build
+FROM ${TOOLCHAIN_IMAGE} AS existing
+FROM debian:13.2
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential g++-aarch64-linux-gnu cmake ninja-build python3 git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=existing /opt/android-ndk-r23b /opt/android-ndk-r23b
+# This path describes the existing x86 Linux toolchain cache, not a worker ABI.
+COPY --from=existing /app/build/daemon-x86_64/_deps/dobby-src /opt/wrapper-deps/dobby-src
+COPY --from=existing /app/build/daemon-x86_64/_deps/nlohmann_json-src /opt/wrapper-deps/json-src

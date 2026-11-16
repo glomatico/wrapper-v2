@@ -119,5 +119,6 @@
   "apk_split": "split_config.arm64_v8a.apk",
   "android_api": 21,
   "context_profile": null,
-  "context_supported": false
+  "context_supported": false,
+  "context_contract": null
 }
