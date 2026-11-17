@@ -102,13 +102,14 @@ def main():
                 reply(id_, error="authentication_required")
             else:
                 invalid = params["adam_id"] == "6666"
-                reply(id_, {"context": {
-                    "profile": PROFILE,
-                    "ctx": base64.b64encode(bytes(1 if invalid else 0x8000)).decode(),
-                    "state": base64.b64encode(bytes(0x800)).decode(),
-                    "bl": 5,
-                    "r9b": 17,
-                }})
+                contract = profile["context_contract"]
+                context = {
+                    "profile": profile["context_profile"],
+                    "ctx": base64.b64encode(bytes(1 if invalid else contract["ctx_bytes"])).decode(),
+                    "state": base64.b64encode(bytes(contract["state_bytes"])).decode(),
+                }
+                context.update({field: 5 for field in contract["byte_fields"]})
+                reply(id_, {"context": context})
         elif op == "session.close":
             reply(id_, {"state": "closed"})
             return

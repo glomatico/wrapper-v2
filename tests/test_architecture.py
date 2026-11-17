@@ -22,6 +22,11 @@ class ArchitectureTests(unittest.TestCase):
         profiles = [load_profile(abi) for abi in ("x86_64", "arm64-v8a")]
         self.assertNotEqual(profiles[0]["apple_libraries"], profiles[1]["apple_libraries"])
         for profile in profiles:
+            self.assertEqual(profile["profile"], "apple-music-1109-" + profile["architecture"])
+            self.assertEqual(profile["context_profile"], profile["profile"])
+            self.assertTrue(profile["context_supported"])
+            self.assertEqual(profile["context_contract"]["ctx_bytes"],
+                             9504 if profile["architecture"] == "arm64-v8a" else 32768)
             self.assertEqual(profile["android_api"],21)
             self.assertEqual(len(profile["apple_libraries"]),18)
             for digest in profile["apple_libraries"].values():

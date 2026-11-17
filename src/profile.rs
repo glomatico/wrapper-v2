@@ -113,6 +113,19 @@ mod tests {
         });
         assert!(x86.validate_context(&valid));
         assert!(!arm64.validate_context(&valid));
+        let arm_valid = json!({
+            "profile":arm64.context_profile,
+            "ctx":STANDARD.encode(vec![0; 0x2520]),
+            "state":STANDARD.encode(vec![0; 0x900]),
+        });
+        assert!(arm64.validate_context(&arm_valid));
+        assert!(!x86.validate_context(&arm_valid));
+        let mut wrong_arm = arm_valid.clone();
+        wrong_arm["state"] = json!(STANDARD.encode(vec![0; 0x800]));
+        assert!(!arm64.validate_context(&wrong_arm));
+        wrong_arm = arm_valid.clone();
+        wrong_arm["profile"] = json!("apple-music-1109-x86_64");
+        assert!(!arm64.validate_context(&wrong_arm));
         for (field, bad) in [
             ("profile", json!("wrong")),
             ("ctx", json!("")),

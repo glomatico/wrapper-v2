@@ -1,5 +1,5 @@
 {
-  "profile": "apple-music-3.6.0.1109-arm64-v8a-native-v1",
+  "profile": "apple-music-1109-arm64-v8a",
   "version": "3.6.0-beta",
   "build": 1109,
   "architecture": "arm64-v8a",
@@ -118,7 +118,11 @@
   "elf_machine": 183,
   "apk_split": "split_config.arm64_v8a.apk",
   "android_api": 21,
-  "context_profile": null,
-  "context_supported": false,
-  "context_contract": null
+  "context_profile": "apple-music-1109-arm64-v8a",
+  "context_supported": true,
+  "context_contract": {
+    "ctx_bytes": 9504,
+    "state_bytes": 2304,
+    "byte_fields": []
+  }
 }

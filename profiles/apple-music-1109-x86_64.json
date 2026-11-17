@@ -1,5 +1,5 @@
 {
-  "profile": "apple-music-3.6.0.1109-x86_64-research-v1",
+  "profile": "apple-music-1109-x86_64",
   "version": "3.6.0-beta",
   "build": 1109,
   "architecture": "x86_64",
@@ -117,7 +117,7 @@
   "elf_machine": 62,
   "apk_split": "split_config.x86_64.apk",
   "android_api": 21,
-  "context_profile": "apple-music-3.6.0.1109-x86_64-research-v1",
+  "context_profile": "apple-music-1109-x86_64",
   "context_supported": true,
   "context_contract": {
     "ctx_bytes": 32768,
