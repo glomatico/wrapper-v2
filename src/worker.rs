@@ -34,6 +34,78 @@ const MAX_RESPONSE: usize = 4 * 1024 * 1024;
 const COMMAND_LIMIT: Duration = Duration::from_secs(125);
 const LOGIN_LIMIT: Duration = Duration::from_secs(610);
 
+// Only these fixed enums and bounded primitive values from native IPC may
+// reach logs. In particular, never log Apple's textual errors or dialog text.
+#[derive(Debug)]
+struct AuthDiagnostic<'a> {
+    stage: &'a str,
+    callback_failure: &'a str,
+    response_type: Option<i32>,
+    apple_error_code: Option<i32>,
+    credential_callbacks: u64,
+    dialog_callbacks: u64,
+    unmatched_dialogs: u64,
+    hsa2_requested: bool,
+    known_dialog_selected: bool,
+}
+
+fn parse_auth_diagnostic(value: &Value) -> Option<AuthDiagnostic<'_>> {
+    let stage = value.get("stage")?.as_str()?;
+    if !matches!(
+        stage,
+        "before_flow"
+            | "flow_unavailable"
+            | "running_flow"
+            | "response_missing"
+            | "native_response"
+            | "callback_rejected"
+    ) {
+        return None;
+    }
+    let callback_failure = value.get("callback_failure")?.as_str()?;
+    if !matches!(
+        callback_failure,
+        "none" | "inactive_login" | "credential_limit" | "code_cancelled" | "unhandled_dialog"
+    ) {
+        return None;
+    }
+    let bounded_count = |name| value.get(name)?.as_u64().filter(|count| *count <= 16);
+    let bounded_int = |name| {
+        value
+            .get(name)
+            .and_then(Value::as_i64)
+            .and_then(|n| i32::try_from(n).ok())
+    };
+    Some(AuthDiagnostic {
+        stage,
+        callback_failure,
+        response_type: bounded_int("response_type"),
+        apple_error_code: bounded_int("apple_error_code"),
+        credential_callbacks: bounded_count("credential_callbacks")?,
+        dialog_callbacks: bounded_count("dialog_callbacks")?,
+        unmatched_dialogs: bounded_count("unmatched_dialogs")?,
+        hsa2_requested: value.get("hsa2_requested")?.as_bool()?,
+        known_dialog_selected: value.get("known_dialog_selected")?.as_bool()?,
+    })
+}
+
+fn log_auth_diagnostic(error: &Value) {
+    if let Some(diag) = error.get("auth").and_then(parse_auth_diagnostic) {
+        tracing::warn!(
+            event = "session.auth_diagnostic",
+            stage = diag.stage,
+            callback_failure = diag.callback_failure,
+            response_type = ?diag.response_type,
+            apple_error_code = ?diag.apple_error_code,
+            credential_callbacks = diag.credential_callbacks,
+            dialog_callbacks = diag.dialog_callbacks,
+            unmatched_dialogs = diag.unmatched_dialogs,
+            hsa2_requested = diag.hsa2_requested,
+            known_dialog_selected = diag.known_dialog_selected
+        );
+    }
+}
+
 pub enum LoginReply {
     Finished(Value),
     Challenge { id: String, kind: String },
@@ -479,6 +551,9 @@ impl Controller {
                     .get("restart_required")
                     .and_then(Value::as_bool)
                     .ok_or_else(|| ApiError::worker_unavailable("worker_protocol_error"))?;
+                if code == "authentication_failed" {
+                    log_auth_diagnostic(error);
+                }
                 Ok(Packet::Error(ApiError::native(code, retryable, restart)))
             }
             None => Err(ApiError::worker_unavailable("worker_protocol_error")),
@@ -491,5 +566,41 @@ impl Controller {
             let _ = worker.child.wait().await;
             tracing::info!(event = "worker.stopped");
         }
+    }
+}
+
+#[cfg(test)]
+mod auth_diagnostic_tests {
+    use super::*;
+
+    fn safe() -> Value {
+        json!({
+            "stage":"native_response","callback_failure":"none",
+            "response_type":4,"apple_error_code":-42,
+            "credential_callbacks":1,"dialog_callbacks":1,"unmatched_dialogs":0,
+            "hsa2_requested":false,"known_dialog_selected":true
+        })
+    }
+
+    #[test]
+    fn only_explicitly_allowed_native_values_are_accepted() {
+        let valid = safe();
+        let parsed = parse_auth_diagnostic(&valid).unwrap();
+        assert_eq!(parsed.apple_error_code, Some(-42));
+        assert_eq!(parsed.response_type, Some(4));
+        assert!(parsed.known_dialog_selected);
+        let mut invalid = safe();
+        invalid["stage"] = json!("attacker-controlled-text");
+        assert!(parse_auth_diagnostic(&invalid).is_none());
+        invalid = safe();
+        invalid["callback_failure"] = json!("private-password");
+        assert!(parse_auth_diagnostic(&invalid).is_none());
+        invalid = safe();
+        invalid["credential_callbacks"] = json!(1700);
+        assert!(parse_auth_diagnostic(&invalid).is_none());
+        invalid = safe();
+        invalid["hsa2_requested"] = json!("true");
+        assert!(parse_auth_diagnostic(&invalid).is_none());
+        assert!(parse_auth_diagnostic(&json!({})).is_none());
     }
 }

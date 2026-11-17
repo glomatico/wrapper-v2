@@ -28,7 +28,7 @@ int main() {
     auto runtime=new Runtime;auto session=new Session(*runtime,protocol);
     unsigned operations=0;
     for(;;) {
-        Json request;JsonGuard guard{request};std::string id;bool stop=false;unsigned exit_code=0;
+        Json request;JsonGuard guard{request};std::string id,op;bool stop=false;unsigned exit_code=0;
         try {
             // Bound partial frames as well as native calls.
             arm(180000);
@@ -37,7 +37,7 @@ int main() {
             if(request.is_object()&&request.contains("id")&&request["id"].is_string()&&request["id"].get_ref<const std::string&>().size()<=64)id=request["id"];
             Protocol::validate(request);
             arm(request.value("timeout_ms",120000u));
-            const std::string op=request["op"];
+            op=request["op"];
             const auto& params=request["params"];
             Json result;JsonGuard result_guard{result};
             if(op=="shutdown"||op=="session.close"){result={{"state","closed"}};stop=true;}
@@ -65,7 +65,12 @@ int main() {
             protocol.write(response);arm(0);
         } catch(const Error& e) {
             if(std::string(e.code)=="transport_closed"||std::string(e.code)=="invalid_frame")_exit(65);
-            try{protocol.write({{"v",1},{"id",id},{"ok",false},{"error",{{"code",e.code},{"retryable",e.retryable},{"restart_required",e.fatal}}}});}catch(...){_exit(65);}
+            try{
+                Json error={{"code",e.code},{"retryable",e.retryable},{"restart_required",e.fatal}};
+                if(op=="session.login"&&std::string(e.code)=="authentication_failed")
+                    error["auth"]=session->authentication_diagnostic();
+                protocol.write({{"v",1},{"id",id},{"ok",false},{"error",std::move(error)}});
+            }catch(...){_exit(65);}
             arm(0);stop=e.fatal;exit_code=70;
         } catch(...) {
             try{protocol.write({{"v",1},{"id",id},{"ok",false},{"error",{{"code","internal_error"},{"retryable",false},{"restart_required",true}}}});}catch(...){}

@@ -6,6 +6,13 @@ No separate JSONL export mode is required.
 
 At the default `RUST_LOG=info` level the server reports startup, sanitized
 HTTP access records, worker lifecycle events, session transitions and errors.
+When a fresh native login fails, `session.auth_diagnostic` records an
+allowlisted failure stage, the native response type and integer Apple error
+code when available, plus bounded credential/dialog callback counts and fixed
+callback outcomes. The public HTTP error remains `authentication_failed`.
+Native error descriptions, login identifiers, passwords, challenges and
+dialog text are never included. These diagnostics identify the failed stage,
+not necessarily its underlying cause.
 When `WRAPPER_USERNAME` and `WRAPPER_PASSWORD` are both configured, startup
 tries the saved session first, then attempts automatic login if needed. Events
 `session.auto_auth_cached`, `session.auto_auth_restored`, and

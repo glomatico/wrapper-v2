@@ -37,11 +37,14 @@ def send(value):
     sys.stdout.buffer.flush()
 
 
-def reply(id_, value=None, error=None):
+def reply(id_, value=None, error=None, auth=None):
     if error:
-        send({"v": 1, "id": id_, "ok": False, "error": {
+        packet={"v": 1, "id": id_, "ok": False, "error": {
             "code": error, "retryable": False, "restart_required": False,
-        }})
+        }}
+        if auth is not None:
+            packet["error"]["auth"]=auth
+        send(packet)
     else:
         send({"v": 1, "id": id_, "ok": True, "result": value or {}})
 
@@ -76,6 +79,16 @@ def main():
                 session = "authenticated"
                 reply(id_, {"state": session, "storefront": "143441"})
         elif op == "session.login":
+            if params["username"] == "authdiagnostic":
+                reply(id_, error="authentication_failed", auth={
+                    "stage":"native_response","callback_failure":"none",
+                    "response_type":2,"apple_error_code":-42,
+                    "credential_callbacks":1,"dialog_callbacks":1,
+                    "unmatched_dialogs":0,"hsa2_requested":False,
+                    "known_dialog_selected":True,
+                    "unexpected_native_text":"SHOULD_NOT_LEAK",
+                })
+                continue
             if params["username"] == "twofactor":
                 send({"v": 1, "id": id_, "event": "auth.challenge",
                       "challenge_id": "proof-1", "kind": "two_factor"})

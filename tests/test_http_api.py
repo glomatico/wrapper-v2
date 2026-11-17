@@ -211,6 +211,26 @@ class ServerContract(unittest.TestCase):
                             and isinstance(item["status"], int) for item in requests))
         self.assertFalse(any(item.get("path") == "/health" for item in requests))
 
+    def test_09_auth_diagnostics_remain_in_private_logs(self):
+        secret = "super-private-login-password-do-not-log"
+        status, answer = self.request(
+            "POST", "/session/login",
+            {"username": "authdiagnostic", "password": secret},
+        )
+        self.assertEqual(status, 502)
+        self.assertEqual(answer["error"]["code"], "authentication_failed")
+        self.assertNotIn("auth", answer["error"])
+        logs = self.log_path.read_text()
+        self.assertNotIn(secret, logs)
+        self.assertNotIn("SHOULD_NOT_LEAK", logs)
+        events = [json.loads(line) for line in logs.splitlines()]
+        diagnostics = [e for e in events if e.get("event") == "session.auth_diagnostic"]
+        self.assertGreaterEqual(len(diagnostics), 1)
+        diagnostic = diagnostics[-1]
+        self.assertEqual(diagnostic["stage"], "native_response")
+        self.assertEqual(diagnostic["apple_error_code"], "Some(-42)")
+        self.assertEqual(diagnostic["credential_callbacks"], 1)
+
 
 class ArmServerContract(ServerContract):
     architecture = "arm64-v8a"

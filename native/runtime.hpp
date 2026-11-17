@@ -51,6 +51,12 @@ class Session {
     std::string state_="logged_out",storefront_,request_id_;
     Secret username_,password_,dev_token_,music_token_;
     unsigned challenge_=0,credentials_count_=0;
+    unsigned dialog_count_=0,unmatched_dialogs_=0;
+    int auth_response_type_=0,auth_error_code_=0;
+    bool auth_has_response_=false,auth_has_error_=false;
+    bool auth_hsa2_=false,auth_matched_dialog_=false;
+    const char* auth_stage_="not_started";
+    const char* callback_failure_="none";
     bool login_active_=false,callback_failed_=false;
     static Session* active_;
     static void credentials(Shared*,Shared*) noexcept;
@@ -63,6 +69,7 @@ public:
     void attach();
     Json restore();
     Json login(const Json&,const std::string& id);
+    Json authentication_diagnostic() const;
     Json status() const;
     Json export_credentials();
     void require();
