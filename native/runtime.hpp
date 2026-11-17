@@ -49,7 +49,12 @@ class Session {
     Runtime& runtime_;
     Protocol& protocol_;
     std::string state_="logged_out",storefront_,request_id_;
-    Secret username_,password_,dev_token_,music_token_;
+    // Apple's CredentialsResponse can hold pointers to the strings supplied
+    // by its setters after the callback returns. The submitted password must
+    // therefore live until AuthenticateFlow::run() has completed, including
+    // the password+2FA case. The old ARM64 Wrapper used global buffers for
+    // this; per-session storage is sufficient and can be wiped afterwards.
+    Secret username_,password_,submitted_password_,dev_token_,music_token_;
     unsigned challenge_=0,credentials_count_=0;
     bool login_active_=false,callback_failed_=false;
     static Session* active_;

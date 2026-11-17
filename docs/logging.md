@@ -13,6 +13,17 @@ tries the saved session first, then attempts automatic login if needed. Events
 `session.auto_auth_2fa_required` mean the operator must intervene. An automatic
 2FA challenge is cancelled, so the `/session/login` and `/session/challenge`
 HTTP flow can be used interactively without restarting.
+
+The pinned ARM64 native worker distinguishes unsuccessful authentication
+stages without logging Apple messages, credentials, or dialog text:
+`authentication_flow_unavailable` (could not construct the Apple flow),
+`authentication_response_missing` (the flow returned no response),
+`authentication_callback_failed` (a credentials callback was cancelled or
+exceeded its limit), `authentication_no_credentials_prompt` (Apple returned a
+non-success result without requesting credentials), and
+`authentication_response_not_success` (Apple returned a non-success result
+after a credentials callback). These codes identify the failure stage; they
+do **not** prove an incorrect password or identify an Apple-side cause.
 Set `RUST_LOG=debug` to include successful `/health` probes, or `warn`/`error`
 to reduce volume. Valid levels are `trace`, `debug`, `info`, `warn`, `error`;
 invalid values fall back to `info`. This configuration **only enables Wrapper's
