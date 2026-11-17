@@ -1,3 +1,4 @@
+mod auto_auth;
 mod config;
 mod error;
 mod http;
@@ -27,6 +28,7 @@ async fn main() {
 
 async fn serve() -> Result<(), error::ApiError> {
     let settings = Config::from_env()?;
+    let credentials = auto_auth::Credentials::take_from_env()?;
     let listener = TcpListener::bind((settings.host, settings.port))
         .await
         .map_err(|_| error::ApiError::worker_unavailable("http_bind_failed"))?;
@@ -39,6 +41,12 @@ async fn serve() -> Result<(), error::ApiError> {
         host = %settings.host,
         port = settings.port,
     );
+    if let Some(credentials) = credentials {
+        let supervisor = api.supervisor();
+        tokio::spawn(async move {
+            auto_auth::initialize(&supervisor, credentials).await;
+        });
+    }
     loop {
         let (stream, _) = listener
             .accept()

@@ -307,6 +307,9 @@ impl Controller {
         let mut command = Command::new(&config.launcher);
         command
             .arg(&config.rootfs)
+            // Native code only needs the framed IPC, not the login secrets.
+            .env_remove("WRAPPER_USERNAME")
+            .env_remove("WRAPPER_PASSWORD")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

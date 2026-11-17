@@ -43,6 +43,10 @@ impl Api {
         })
     }
 
+    pub(crate) fn supervisor(&self) -> Arc<Supervisor> {
+        Arc::clone(&self.supervisor)
+    }
+
     pub async fn serve(
         self: Arc<Self>,
         request: Request<Incoming>,

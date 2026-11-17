@@ -5,7 +5,7 @@ FROM debian:13.2
 ARG TARGETARCH
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libcap2-bin \
+    && apt-get install -y --no-install-recommends ca-certificates libcap2-bin curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --chmod=0755 build/package/${TARGETARCH}/wrapperd /usr/local/bin/wrapperd

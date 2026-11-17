@@ -70,8 +70,11 @@ def main():
                 reply(id_, {"dev_token": "mock-developer-token",
                             "music_user_token": "mock-media-user-token"})
         elif op == "session.restore":
-            session = "authenticated"
-            reply(id_, {"state": session, "storefront": "143441"})
+            if os.environ.get("WRAPPER_MOCK_NO_CACHED_SESSION") == "1":
+                reply(id_, error="no_cached_session")
+            else:
+                session = "authenticated"
+                reply(id_, {"state": session, "storefront": "143441"})
         elif op == "session.login":
             if params["username"] == "twofactor":
                 send({"v": 1, "id": id_, "event": "auth.challenge",

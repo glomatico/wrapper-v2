@@ -1,6 +1,8 @@
 services:
   wrapper:
     image: ${WRAPPER_IMAGE:?Set the locally packaged amd64 or arm64 image}
+    # Also passes optional WRAPPER_USERNAME/WRAPPER_PASSWORD for auto-login.
+    env_file: .env
     build:
       context: .
       dockerfile: Dockerfile

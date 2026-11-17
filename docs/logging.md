@@ -6,6 +6,13 @@ No separate JSONL export mode is required.
 
 At the default `RUST_LOG=info` level the server reports startup, sanitized
 HTTP access records, worker lifecycle events, session transitions and errors.
+When `WRAPPER_USERNAME` and `WRAPPER_PASSWORD` are both configured, startup
+tries the saved session first, then attempts automatic login if needed. Events
+`session.auto_auth_cached`, `session.auto_auth_restored`, and
+`session.auto_auth_complete` indicate success; `session.auto_auth_failed` or
+`session.auto_auth_2fa_required` mean the operator must intervene. An automatic
+2FA challenge is cancelled, so the `/session/login` and `/session/challenge`
+HTTP flow can be used interactively without restarting.
 Set `RUST_LOG=debug` to include successful `/health` probes, or `warn`/`error`
 to reduce volume. Valid levels are `trace`, `debug`, `info`, `warn`, `error`;
 invalid values fall back to `info`. This configuration **only enables Wrapper's
