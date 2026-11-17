@@ -128,6 +128,9 @@ pub struct Supervisor {
 struct Controller {
     next_id: u64,
     worker: Option<NativeWorker>,
+    // Preserve only the fact that a live worker was authenticated. A new
+    // native process must revalidate the cached session before serving work.
+    restore_after_restart: bool,
 }
 
 struct NativeWorker {
@@ -149,6 +152,7 @@ impl Supervisor {
             control: Arc::new(Mutex::new(Controller {
                 next_id: 1,
                 worker: None,
+                restore_after_restart: false,
             })),
             pending: StdMutex::new(None),
         })
@@ -159,16 +163,30 @@ impl Supervisor {
         let result = control.command(&self.settings, op, params).await;
         match result {
             Ok(Packet::Success(value)) => {
+                if matches!(op, "session.status" | "session.restore") {
+                    control.restore_after_restart =
+                        value.get("state").and_then(Value::as_str) == Some("authenticated");
+                }
                 if op == "session.restore" {
                     tracing::info!(event = "session.restored");
                 }
                 if op == "session.close" {
+                    control.restore_after_restart = false;
                     tracing::info!(event = "session.closed");
                     control.discard().await;
                 }
                 Ok(value)
             }
             Ok(Packet::Error(error)) => {
+                if matches!(
+                    error.code.as_str(),
+                    "session_expired"
+                        | "authentication_required"
+                        | "session_validation_failed"
+                        | "no_cached_session"
+                ) {
+                    control.restore_after_restart = false;
+                }
                 tracing::warn!(event = "worker.error", operation = op,
                     code = %error.code, restart_required = error.restart_required);
                 if error.restart_required {
@@ -324,7 +342,14 @@ impl Supervisor {
         if let Err(error) = &result {
             tracing::warn!(event = "worker.error", operation = "session.login",
                 code = %error.code);
+            control.restore_after_restart = false;
             control.discard().await;
+        } else {
+            control.restore_after_restart = terminal_session
+                .as_ref()
+                .and_then(|value| value.get("state"))
+                .and_then(Value::as_str)
+                == Some("authenticated");
         }
         if let Ok(mut pending) = self.pending.lock() {
             *pending = None;
@@ -428,11 +453,48 @@ impl Controller {
             {
                 tracing::info!(event = "worker.started",
                     architecture = %config.profile.architecture);
-                Ok(())
             }
-            Packet::Error(error) => Err(error),
-            _ => Err(ApiError::worker_unavailable("unsupported_worker_profile")),
+            Packet::Error(error) => return Err(error),
+            _ => return Err(ApiError::worker_unavailable("unsupported_worker_profile")),
         }
+        if self.restore_after_restart {
+            // The worker has no in-memory authentication after recycling. The
+            // saved native session survives in session_dir, just as it does
+            // after a full container restart. Do not silently restore sessions
+            // on first startup or after an explicit session.close.
+            self.restore_after_restart = false;
+            let id = self.allocate_id();
+            let restored = timeout(COMMAND_LIMIT, async {
+                self.send(&id, "session.restore", json!({}), 120000).await?;
+                self.read(&id).await
+            })
+            .await
+            .map_err(|_| ApiError::worker_unavailable("worker_timeout"))??;
+            match restored {
+                Packet::Success(value)
+                    if value.get("state").and_then(Value::as_str) == Some("authenticated") =>
+                {
+                    self.restore_after_restart = true;
+                    tracing::info!(event = "session.recovered");
+                }
+                Packet::Error(error) => {
+                    tracing::warn!(event = "session.recovery_failed", code = %error.code);
+                    if error.restart_required {
+                        return Err(error);
+                    }
+                }
+                Packet::Success(_) => {
+                    tracing::warn!(
+                        event = "session.recovery_failed",
+                        code = "not_authenticated"
+                    );
+                }
+                Packet::Challenge { .. } => {
+                    return Err(ApiError::worker_unavailable("unexpected_worker_event"));
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn command(

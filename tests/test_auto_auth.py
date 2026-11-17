@@ -108,6 +108,30 @@ class AutoAuthTests(unittest.TestCase):
         self.assertFalse(any(e.get("event") == "session.auto_auth_2fa_required"
                              for e in self.events()))
 
+    def test_authenticated_session_survives_worker_recycle(self):
+        self.env.update(WRAPPER_USERNAME="test-account", WRAPPER_PASSWORD="test-password")
+        self.launch()
+        self.wait_for(lambda: any(e.get("event") == "session.auto_auth_restored"
+                                  for e in self.events()))
+        self.assertEqual(self.request("GET", "/playback?adam_id=7777")[0], 409)
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "authenticated")
+        self.assertEqual(self.request("GET", "/playback?adam_id=12345")[0], 200)
+
+    def test_missing_cached_session_does_not_fake_recovery(self):
+        self.env["WRAPPER_MOCK_NO_CACHED_SESSION"] = "1"
+        self.launch()
+        self.wait_for(lambda: self.request("GET", "/session")[0] == 200)
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
+        status, session = self.request("POST", "/session/login",
+                                       {"username": "mock-account", "password": "mock-password"})
+        self.assertEqual(status, 200)
+        self.assertEqual(session["state"], "authenticated")
+        self.assertEqual(self.request("GET", "/playback?adam_id=7777")[0], 409)
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
+        self.assertEqual(self.request("GET", "/playback?adam_id=12345")[0], 403)
+        failures = [e for e in self.events() if e.get("event") == "session.recovery_failed"]
+        self.assertEqual(len(failures), 1)
+
     def test_2fa_is_cancelled_and_manual_login_still_works(self):
         self.env.update(WRAPPER_USERNAME="twofactor", WRAPPER_PASSWORD="some-password",
                         WRAPPER_MOCK_NO_CACHED_SESSION="1")

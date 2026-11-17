@@ -37,10 +37,11 @@ def send(value):
     sys.stdout.buffer.flush()
 
 
-def reply(id_, value=None, error=None, auth=None):
+def reply(id_, value=None, error=None, auth=None, restart_required=False):
     if error:
         packet={"v": 1, "id": id_, "ok": False, "error": {
-            "code": error, "retryable": False, "restart_required": False,
+            "code": error, "retryable": restart_required,
+            "restart_required": restart_required,
         }}
         if auth is not None:
             packet["error"]["auth"]=auth
@@ -102,6 +103,9 @@ def main():
             session = "authenticated"
             reply(id_, {"state": session, "storefront": "143441"})
         elif op == "playback.get":
+            if params["adam_id"] == "7777":
+                reply(id_, error="worker_recycle", restart_required=True)
+                return
             if params["adam_id"] == "9999":
                 os._exit(70)
             if params["adam_id"] == "8888":

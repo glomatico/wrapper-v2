@@ -154,11 +154,17 @@ class ServerContract(unittest.TestCase):
         self.assertEqual(self.request("POST", "/decrypt", {"samples":[]})[0], 404)
 
     def test_04_worker_crashes_and_restarts(self):
-        self.assertEqual(self.request("GET", "/playback?adam_id=8888")[0], 503)
-        self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
         self.assertEqual(self.request("POST", "/session/restore")[0], 200)
+        self.assertEqual(self.request("GET", "/playback?adam_id=8888")[0], 503)
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "authenticated")
+        self.assertEqual(self.request("GET", "/playback?adam_id=12345")[0], 200)
+        status, error = self.request("GET", "/playback?adam_id=7777")
+        self.assertEqual(status, 409)
+        self.assertEqual(error["error"]["code"], "worker_recycle")
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "authenticated")
+        self.assertEqual(self.request("GET", "/playback?adam_id=12345")[0], 200)
         self.assertEqual(self.request("GET", "/playback?adam_id=9999")[0], 503)
-        self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "authenticated")
         self.assertEqual(self.request("POST", "/session/close")[0], 200)
         self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
 
@@ -177,6 +183,7 @@ class ServerContract(unittest.TestCase):
                                        {"username": "mock-account", "password": "mock-password"})
         self.assertEqual(status, 200)
         self.assertEqual(session["state"], "authenticated")
+        self.assertEqual(self.request("GET", "/playback?adam_id=7777")[0], 409)
         self.assertEqual(self.request("GET", "/session")[1]["state"], "authenticated")
 
     def test_07_credentials_export(self):
