@@ -1,4 +1,5 @@
 #include "protocol.hpp"
+#include <sys/time.h>
 #include <cerrno>
 #include <cstdint>
 namespace worker {
@@ -79,6 +80,18 @@ void Protocol::validate(const Json& j) {
 }
 std::string Protocol::challenge(const std::string& id,const std::string& challenge_id) {
     write({{"v",1},{"id",id},{"event","auth.challenge"},{"challenge_id",challenge_id},{"kind","two_factor"}});
+    // Suspend the process-wide native request deadline only while waiting for
+    // a human to submit 2FA. Restore the remaining time when the continuation
+    // arrives so Apple processing itself remains bounded. This is the only
+    // portion of the native login flow without a deadline.
+    struct PauseDeadline {
+        itimerval remaining{};
+        PauseDeadline() {
+            itimerval disabled{};
+            if(setitimer(ITIMER_REAL,&disabled,&remaining))throw Error("worker_timeout",true,true);
+        }
+        ~PauseDeadline(){setitimer(ITIMER_REAL,&remaining,nullptr);}
+    } pause;
     Json answer;JsonGuard guard{answer};
     if(!read(answer))throw Error("transport_closed",false,true);
     validate(answer);

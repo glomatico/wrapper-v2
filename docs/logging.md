@@ -17,9 +17,15 @@ When `WRAPPER_USERNAME` and `WRAPPER_PASSWORD` are both configured, startup
 tries the saved session first, then attempts automatic login if needed. Events
 `session.auto_auth_cached`, `session.auto_auth_restored`, and
 `session.auto_auth_complete` indicate success; `session.auto_auth_failed` or
-`session.auto_auth_2fa_required` mean the operator must intervene. An automatic
-2FA challenge is cancelled, so the `/session/login` and `/session/challenge`
-HTTP flow can be used interactively without restarting.
+`session.auto_auth_2fa_required` mean the operator must intervene. Automatic
+2FA challenges remain pending until an operator responds or explicitly cancels
+them; Wrapper imposes no deadline on that wait. While a challenge is pending,
+the single native worker is occupied, and other worker-dependent requests
+return `worker_busy` (HTTP 503). Retrieve the challenge ID using
+`GET /session/challenge`, then send `POST /session/challenge` with JSON fields
+`challenge_id` and `code` (six digits). To cancel, send an empty `code`. An
+attempt to retrieve a nonexistent challenge returns HTTP 404.
+The challenge ID and verification code are never written to logs.
 Set `RUST_LOG=debug` to include successful `/health` probes, or `warn`/`error`
 to reduce volume. Valid levels are `trace`, `debug`, `info`, `warn`, `error`;
 invalid values fall back to `info`. This configuration **only enables Wrapper's

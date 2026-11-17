@@ -1,7 +1,9 @@
 #include "protocol.hpp"
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <iostream>
 #include <thread>
+#include <chrono>
 using namespace worker;
 using namespace std::string_literals;
 static void check(bool v){if(!v)throw std::runtime_error("test failed");}
@@ -41,6 +43,23 @@ int main(){
     check(receiver.challenge("login","c1").empty());check(sender.read(received));
     sender.write({{"v",1},{"id","login"},{"op","auth.respond"},{"params",{{"challenge_id","c1"},{"code","12a456"}}}});
     rejects([&]{receiver.challenge("login","c1");},"invalid_auth_code");check(sender.read(received));
+    // The native request timer must pause while a human answers 2FA, then
+    // resume after the continuation (instead of killing the waiting worker).
+    itimerval deadline{};deadline.it_value.tv_sec=1;
+    check(setitimer(ITIMER_REAL,&deadline,nullptr)==0);
+    std::thread delayed([&]{
+        Json challenge;
+        check(sender.read(challenge)&&challenge["event"]=="auth.challenge");
+        std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+        sender.write({{"v",1},{"id","login"},{"op","auth.respond"},
+                      {"params",{{"challenge_id","delayed"},{"code","123456"}}}});
+    });
+    check(receiver.challenge("login","delayed")=="123456");
+    itimerval resumed{};
+    check(getitimer(ITIMER_REAL,&resumed)==0);
+    check(resumed.it_value.tv_sec>0||resumed.it_value.tv_usec>0);
+    itimerval disabled{};check(setitimer(ITIMER_REAL,&disabled,nullptr)==0);
+    delayed.join();
     // Reject excessive nesting before exhausting the native stack.
     std::string nested(70,'[');nested+="0";nested+=std::string(70,']');
     unsigned char depth_header[4]={0,0,0,static_cast<unsigned char>(nested.size())};

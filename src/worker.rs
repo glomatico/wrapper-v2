@@ -11,7 +11,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::{Child, ChildStdin, ChildStdout, Command},
     sync::{oneshot, Mutex, OwnedMutexGuard},
-    time::{timeout, timeout_at, Instant},
+    time::timeout,
 };
 use zeroize::{Zeroize, Zeroizing};
 
@@ -32,7 +32,8 @@ pub(crate) fn wipe_json_value(value: &mut Value) {
 const MAX_REQUEST: usize = 1024 * 1024;
 const MAX_RESPONSE: usize = 4 * 1024 * 1024;
 const COMMAND_LIMIT: Duration = Duration::from_secs(125);
-const LOGIN_LIMIT: Duration = Duration::from_secs(610);
+// Bound native login activity, but not the time a human takes to answer 2FA.
+const LOGIN_STEP_LIMIT: Duration = Duration::from_secs(610);
 
 // Only these fixed enums and bounded primitive values from native IPC may
 // reach logs. In particular, never log Apple's textual errors or dialog text.
@@ -250,10 +251,21 @@ impl Supervisor {
             .answer
             .send((code, reply))
             .map_err(|_| ApiError::worker_unavailable("challenge_expired"))?;
-        timeout(LOGIN_LIMIT, received)
+        timeout(LOGIN_STEP_LIMIT, received)
             .await
-            .map_err(|_| ApiError::worker_unavailable("challenge_expired"))?
+            .map_err(|_| ApiError::worker_unavailable("worker_timeout"))?
             .map_err(|_| ApiError::worker_unavailable("login_worker_closed"))?
+    }
+
+    pub fn pending_challenge(&self) -> Result<Option<LoginReply>, ApiError> {
+        let pending = self
+            .pending
+            .lock()
+            .map_err(|_| ApiError::worker_unavailable("internal_error"))?;
+        Ok(pending.as_ref().map(|challenge| LoginReply::Challenge {
+            id: challenge.id.clone(),
+            kind: "two_factor".into(),
+        }))
     }
 
     async fn login_task(
@@ -263,20 +275,22 @@ impl Supervisor {
         password: Zeroizing<String>,
         first: LoginDelivery,
     ) {
-        let deadline = Instant::now() + LOGIN_LIMIT;
         let mut reply = Some(first);
         let mut terminal_session = None;
         let result: Result<(), ApiError> = async {
             control.ensure(&self.settings).await?;
             let id = control.allocate_id();
             let params = json!({"username":username.as_str(),"password":password.as_str()});
-            timeout_at(deadline, control.send(&id, "session.login", params, 600000))
-                .await
-                .map_err(|_| ApiError::worker_unavailable("worker_timeout"))??;
+            timeout(
+                LOGIN_STEP_LIMIT,
+                control.send(&id, "session.login", params, 600000),
+            )
+            .await
+            .map_err(|_| ApiError::worker_unavailable("worker_timeout"))??;
             // The native worker is synchronous. Responses may include 2FA
             // challenges before the final session.login response.
             loop {
-                let packet = timeout_at(deadline, control.read(&id))
+                let packet = timeout(LOGIN_STEP_LIMIT, control.read(&id))
                     .await
                     .map_err(|_| ApiError::worker_unavailable("worker_timeout"))??;
                 match packet {
@@ -317,13 +331,14 @@ impl Supervisor {
                         {
                             return Err(ApiError::worker_unavailable("login_client_closed"));
                         }
-                        let (code, continuation) = timeout_at(deadline, rx)
+                        // Waiting for an operator has no Wrapper-imposed
+                        // deadline. An empty code explicitly cancels login.
+                        let (code, continuation) = rx
                             .await
-                            .map_err(|_| ApiError::worker_unavailable("challenge_expired"))?
                             .map_err(|_| ApiError::worker_unavailable("challenge_expired"))?;
                         reply = Some(continuation);
-                        timeout_at(
-                            deadline,
+                        timeout(
+                            LOGIN_STEP_LIMIT,
                             control.send(
                                 &id,
                                 "auth.respond",

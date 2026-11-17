@@ -117,6 +117,7 @@ class ServerContract(unittest.TestCase):
                                     {"username": "twofactor", "password": "dummy"})
         self.assertEqual(status, 202)
         self.assertEqual(info["kind"], "two_factor")
+        self.assertEqual(self.request("GET", "/session/challenge"), (202, info))
         self.assertEqual(self.request("GET", "/session")[0], 503)
         self.assertEqual(self.request("POST", "/session/challenge",
                                       {"challenge_id": "incorrect", "code": "123456"})[0], 400)
@@ -124,6 +125,7 @@ class ServerContract(unittest.TestCase):
                                     {"challenge_id": info["challenge_id"], "code": "123456"})
         self.assertEqual(status, 200)
         self.assertEqual(info["state"], "authenticated")
+        self.assertEqual(self.request("GET", "/session/challenge")[0], 404)
 
     def test_03_playback_context_and_validation(self):
         status, playback = self.request("GET", "/playback?adam_id=12345")

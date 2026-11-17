@@ -132,19 +132,43 @@ class AutoAuthTests(unittest.TestCase):
         failures = [e for e in self.events() if e.get("event") == "session.recovery_failed"]
         self.assertEqual(len(failures), 1)
 
-    def test_2fa_is_cancelled_and_manual_login_still_works(self):
+    def test_auto_auth_2fa_stays_pending_until_manually_completed(self):
         self.env.update(WRAPPER_USERNAME="twofactor", WRAPPER_PASSWORD="some-password",
                         WRAPPER_MOCK_NO_CACHED_SESSION="1")
         self.launch()
         self.wait_for(lambda: any(e.get("event") == "session.auto_auth_2fa_required"
                                   for e in self.events()))
-        status, challenge = self.request("POST", "/session/login",
-                                         {"username":"twofactor","password":"dummy"})
+        status, challenge = self.request("GET", "/session/challenge")
         self.assertEqual(status, 202)
+        self.assertEqual(challenge["kind"], "two_factor")
+        self.assertEqual(self.request("GET", "/session")[0], 503)
+        self.assertEqual(self.request("POST", "/session/login",
+                                      {"username": "twofactor", "password": "dummy"})[0], 503)
         self.assertEqual(self.request("POST", "/session/challenge",
                                       {"challenge_id":challenge["challenge_id"],
                                        "code":"123456"})[0], 200)
         self.assertEqual(self.request("GET", "/session")[1]["state"], "authenticated")
+        self.assertEqual(self.request("GET", "/session/challenge")[0], 404)
+
+    def test_auto_auth_2fa_can_be_explicitly_cancelled(self):
+        self.env.update(WRAPPER_USERNAME="twofactor", WRAPPER_PASSWORD="some-password",
+                        WRAPPER_MOCK_NO_CACHED_SESSION="1")
+        self.launch()
+        self.wait_for(lambda: self.request("GET", "/session/challenge")[0] == 202)
+        challenge = self.request("GET", "/session/challenge")[1]
+        status, result = self.request("POST", "/session/challenge",
+                                      {"challenge_id":challenge["challenge_id"], "code":""})
+        self.assertEqual(status, 502)
+        self.assertEqual(result["error"]["code"], "authentication_failed")
+        self.assertEqual(self.request("GET", "/session/challenge")[0], 404)
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
+        # Manual login remains possible after explicit cancellation.
+        status, challenge = self.request("POST", "/session/login",
+                                         {"username": "twofactor", "password": "dummy"})
+        self.assertEqual(status, 202)
+        self.assertEqual(self.request("POST", "/session/challenge",
+                                      {"challenge_id":challenge["challenge_id"],
+                                       "code":"123456"})[0], 200)
 
     def test_incomplete_credentials_fail_closed(self):
         self.env.update(WRAPPER_USERNAME="unique-config-secret")

@@ -149,6 +149,13 @@ impl Api {
             (Method::GET, "/session/credentials") => {
                 self.result("session.credentials", json!({})).await
             }
+            (Method::GET, "/session/challenge") => match self.supervisor.pending_challenge()? {
+                Some(pending) => login_response(pending),
+                None => Err(ApiError::simple(
+                    "no_pending_challenge",
+                    StatusCode::NOT_FOUND,
+                )),
+            },
             (Method::POST, "/session/restore") => {
                 empty_body(body).await?;
                 self.result("session.restore", json!({})).await

@@ -68,13 +68,10 @@ pub async fn initialize(supervisor: &std::sync::Arc<Supervisor>, creds: Credenti
                 code = "not_authenticated"
             );
         }
-        Ok(LoginReply::Challenge { id, .. }) => {
-            // Never leave the native worker waiting for 2FA indefinitely. This
-            // cancels the pending login; operators can retry interactively via
-            // POST /session/login and POST /session/challenge.
-            let _ = supervisor
-                .challenge(&id, Zeroizing::new(String::new()))
-                .await;
+        Ok(LoginReply::Challenge { .. }) => {
+            // Preserve the pending login. An operator can retrieve its
+            // challenge ID using GET /session/challenge and submit the code
+            // through POST /session/challenge without starting another login.
             tracing::warn!(event = "session.auto_auth_2fa_required");
         }
         Err(error) => {
