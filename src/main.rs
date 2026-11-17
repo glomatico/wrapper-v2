@@ -1,6 +1,7 @@
 mod config;
 mod error;
 mod http;
+mod logging;
 mod profile;
 mod worker;
 
@@ -16,9 +17,10 @@ use http::Api;
 
 #[tokio::main]
 async fn main() {
+    logging::init();
     if let Err(err) = serve().await {
         // No request values, credentials, URLs, or raw native errors here.
-        eprintln!("wrapperd: startup failure: {}", err.code);
+        tracing::error!(event = "server.startup_failed", code = %err.code);
         std::process::exit(1);
     }
 }
@@ -29,9 +31,13 @@ async fn serve() -> Result<(), error::ApiError> {
         .await
         .map_err(|_| error::ApiError::worker_unavailable("http_bind_failed"))?;
     let api = Api::new(&settings);
-    eprintln!(
-        "wrapperd: HTTP v1 listening at {}:{}",
-        settings.host, settings.port
+    tracing::info!(
+        event = "server.started",
+        version = env!("CARGO_PKG_VERSION"),
+        protocol = 1,
+        architecture = %settings.profile.architecture,
+        host = %settings.host,
+        port = settings.port,
     );
     loop {
         let (stream, _) = listener
@@ -41,10 +47,14 @@ async fn serve() -> Result<(), error::ApiError> {
         let api = Arc::clone(&api);
         tokio::spawn(async move {
             let service = service_fn(move |request| Arc::clone(&api).serve(request));
-            let _ = http1::Builder::new()
+            if http1::Builder::new()
                 .serve_connection(TokioIo::new(stream), service)
-                .await;
-            // Do not log URLs or headers; signed playback URLs may be private.
+                .await
+                .is_err()
+            {
+                // Hyper errors can contain untrusted URLs; log a static code.
+                tracing::warn!(event = "http.connection_error", code = "connection_failed");
+            }
         });
     }
 }

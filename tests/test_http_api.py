@@ -46,10 +46,12 @@ class ServerContract(unittest.TestCase):
                    WRAPPER_HOST="127.0.0.1", WRAPPER_PORT=str(cls.port), WRAPPER_ARCH=cls.architecture,
                    WRAPPER_LAUNCHER=str(cls.launcher),
                    WRAPPER_ROOTFS=str(directory),
-                   WRAPPER_DEVICE_INFO="a/b/c/d/e/f/g/h/i")
+                   WRAPPER_DEVICE_INFO="a/b/c/d/e/f/g/h/i", RUST_LOG="info")
+        cls.log_path = directory / "wrapper.jsonl"
+        cls.log_file = cls.log_path.open("wb")
         cls.server = subprocess.Popen(
             [str(binary)], env=env, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=cls.log_file,
         )
         for _ in range(100):
             try:
@@ -70,6 +72,8 @@ class ServerContract(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 cls.server.kill()
                 cls.server.wait()
+        if hasattr(cls, "log_file"):
+            cls.log_file.close()
         if hasattr(cls, "temp"):
             cls.temp.cleanup()
 
@@ -180,6 +184,32 @@ class ServerContract(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(credentials["dev_token"], "mock-developer-token")
         self.assertEqual(credentials["music_user_token"], "mock-media-user-token")
+
+    def test_08_logs_are_jsonl_and_do_not_contain_request_secrets(self):
+        secret = "private-nonlogging-marker-0123456789"
+        self.assertEqual(self.request("GET", "/context?" + urlencode({
+            "adam_id": "12345", "key_uri": "skd://" + secret,
+        }))[0], 200)
+        self.assertEqual(self.request("POST", "/v1/" + secret,
+                         {"password": secret})[0], 404)
+        lines = self.log_path.read_text().splitlines()
+        self.assertGreater(len(lines), 0)
+        self.assertNotIn(secret, "\n".join(lines))
+        self.assertNotIn("skd://", "\n".join(lines))
+        self.assertNotIn("mock-media-user-token", "\n".join(lines))
+        events = [json.loads(line) for line in lines]
+        self.assertTrue(all("timestamp" in item and "level" in item
+                            and "event" in item for item in events))
+        self.assertTrue(any(item["event"] == "server.started" for item in events))
+        requests = [item for item in events if item["event"] == "http.request"]
+        self.assertTrue(any(item["path"] == "/context" and item["status"] == 200
+                            for item in requests))
+        self.assertTrue(any(item["path"] == "<unknown>" and item["status"] == 404
+                            for item in requests))
+        self.assertTrue(all(isinstance(item["request_id"], int)
+                            and isinstance(item["duration_ms"], int)
+                            and isinstance(item["status"], int) for item in requests))
+        self.assertFalse(any(item.get("path") == "/health" for item in requests))
 
 
 class ArmServerContract(ServerContract):

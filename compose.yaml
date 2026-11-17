@@ -21,6 +21,7 @@ services:
     environment:
       WRAPPER_DEVICE_INFO: "${WRAPPER_DEVICE_INFO:?Set a stable nine-field device identifier}"
       WRAPPER_DNS: "${WRAPPER_DNS:-1.1.1.1,8.8.8.8}"
+      RUST_LOG: "${RUST_LOG:-info}"
     volumes:
       # Prepared from a user-supplied *pinned* Apple Music APK. Not in image.
       - ${WRAPPER_ROOTFS_DIR:?Set the prepared rootfs path for this host architecture}:/srv/wrapper/rootfs:ro

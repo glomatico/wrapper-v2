@@ -1,5 +1,13 @@
 //! Unversioned HTTP facade for Wrapper-v2 1.0.0; native IPC uses protocol v1.
-use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    convert::Infallible,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
 
 use bytes::Bytes;
 use form_urlencoded::parse;
@@ -23,6 +31,7 @@ type HttpResponse = Response<Full<Bytes>>;
 pub struct Api {
     supervisor: Arc<Supervisor>,
     profile: RuntimeProfile,
+    next_request_id: AtomicU64,
 }
 
 impl Api {
@@ -30,6 +39,7 @@ impl Api {
         Arc::new(Self {
             supervisor: Supervisor::new(config.clone()),
             profile: config.profile.clone(),
+            next_request_id: AtomicU64::new(1),
         })
     }
 
@@ -37,11 +47,69 @@ impl Api {
         self: Arc<Self>,
         request: Request<Incoming>,
     ) -> Result<HttpResponse, Infallible> {
-        let response = match self.handle(request).await {
-            Ok((status, payload)) => answer(status, payload),
-            Err(e) => answer(e.status, e.json()),
+        let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
+        // Only log *known*, literal routes. Raw paths, query parameters, HTTP
+        // headers, and bodies can contain signed URLs, tokens or key URIs.
+        let path = log_route(request.uri().path());
+        let method = if request.method() == Method::GET {
+            "GET"
+        } else if request.method() == Method::POST {
+            "POST"
+        } else {
+            "OTHER"
         };
-        Ok(response)
+        let started = Instant::now();
+        let (status, payload, error_code) = match self.handle(request).await {
+            Ok((status, payload)) => (status, payload, None),
+            Err(e) => {
+                let status = e.status;
+                let code = e.code.clone();
+                (status, e.json(), Some(code))
+            }
+        };
+        let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        let status_code = status.as_u16();
+        if status.is_server_error() {
+            tracing::error!(
+                event = "http.request",
+                request_id,
+                method,
+                path,
+                status = status_code,
+                duration_ms,
+                code = error_code.as_deref().unwrap_or("internal_error")
+            );
+        } else if status.is_client_error() {
+            tracing::warn!(
+                event = "http.request",
+                request_id,
+                method,
+                path,
+                status = status_code,
+                duration_ms,
+                code = error_code.as_deref().unwrap_or("client_error")
+            );
+        } else if path == "/health" {
+            // Successful health probes are very noisy; RUST_LOG=debug enables them.
+            tracing::debug!(
+                event = "http.request",
+                request_id,
+                method,
+                path,
+                status = status_code,
+                duration_ms
+            );
+        } else {
+            tracing::info!(
+                event = "http.request",
+                request_id,
+                method,
+                path,
+                status = status_code,
+                duration_ms
+            );
+        }
+        Ok(answer(status, payload))
     }
 
     async fn handle(&self, request: Request<Incoming>) -> Result<(StatusCode, Value), ApiError> {
@@ -159,6 +227,23 @@ impl Api {
             StatusCode::OK,
             self.supervisor.call(operation, params).await?,
         ))
+    }
+}
+
+fn log_route(path: &str) -> &'static str {
+    match path {
+        "/health" => "/health",
+        "/info" => "/info",
+        "/session" => "/session",
+        "/session/credentials" => "/session/credentials",
+        "/session/restore" => "/session/restore",
+        "/session/close" => "/session/close",
+        "/session/login" => "/session/login",
+        "/session/challenge" => "/session/challenge",
+        "/playback" => "/playback",
+        "/context" => "/context",
+        "/key" => "/key",
+        _ => "<unknown>",
     }
 }
 
@@ -280,5 +365,12 @@ mod tests {
         assert!(validate_key_uri("https://example.org/").is_err());
         assert!(validate_key_uri("skd://bad\n").is_err());
         assert!(validate_key_uri("skd://valid-key").is_ok());
+    }
+    #[test]
+    fn log_routes_never_include_untrusted_request_paths() {
+        assert_eq!(log_route("/context"), "/context");
+        assert_eq!(log_route("/session/credentials"), "/session/credentials");
+        assert_eq!(log_route("/unknown/secret-value"), "<unknown>");
+        assert_eq!(log_route("/context/secret-value"), "<unknown>");
     }
 }

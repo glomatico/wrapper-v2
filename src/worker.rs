@@ -87,22 +87,35 @@ impl Supervisor {
         let result = control.command(&self.settings, op, params).await;
         match result {
             Ok(Packet::Success(value)) => {
+                if op == "session.restore" {
+                    tracing::info!(event = "session.restored");
+                }
                 if op == "session.close" {
+                    tracing::info!(event = "session.closed");
                     control.discard().await;
                 }
                 Ok(value)
             }
             Ok(Packet::Error(error)) => {
+                tracing::warn!(event = "worker.error", operation = op,
+                    code = %error.code, restart_required = error.restart_required);
                 if error.restart_required {
                     control.discard().await;
                 }
                 Err(error)
             }
             Ok(Packet::Challenge { .. }) => {
+                tracing::error!(
+                    event = "worker.error",
+                    operation = op,
+                    code = "unexpected_worker_event"
+                );
                 control.discard().await;
                 Err(ApiError::worker_unavailable("unexpected_worker_event"))
             }
             Err(error) => {
+                tracing::error!(event = "worker.error", operation = op,
+                    code = %error.code);
                 control.discard().await;
                 Err(error)
             }
@@ -236,7 +249,9 @@ impl Supervisor {
         }
         .await;
 
-        if result.is_err() {
+        if let Err(error) = &result {
+            tracing::warn!(event = "worker.error", operation = "session.login",
+                code = %error.code);
             control.discard().await;
         }
         if let Ok(mut pending) = self.pending.lock() {
@@ -248,9 +263,12 @@ impl Supervisor {
         drop(control);
         if let Some(destination) = reply.take() {
             let outcome = match result {
-                Ok(()) => Ok(LoginReply::Finished(
-                    terminal_session.expect("successful login has a terminal response"),
-                )),
+                Ok(()) => {
+                    tracing::info!(event = "session.authenticated");
+                    Ok(LoginReply::Finished(
+                        terminal_session.expect("successful login has a terminal response"),
+                    ))
+                }
                 Err(error) => Err(error),
             };
             let _ = destination.send(outcome);
@@ -333,6 +351,8 @@ impl Controller {
                         == Some(config.profile.context_supported)
                     && result.get("protocol").and_then(Value::as_u64) == Some(1) =>
             {
+                tracing::info!(event = "worker.started",
+                    architecture = %config.profile.architecture);
                 Ok(())
             }
             Packet::Error(error) => Err(error),
@@ -466,6 +486,7 @@ impl Controller {
         if let Some(mut worker) = self.worker.take() {
             let _ = worker.child.kill().await;
             let _ = worker.child.wait().await;
+            tracing::info!(event = "worker.stopped");
         }
     }
 }
