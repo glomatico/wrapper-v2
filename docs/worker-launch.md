@@ -18,7 +18,15 @@ The worker inherits the existing framed IPC on stdin and stdout. Namespace PID 1
 
 When the worker exits, PID 1 returns its exit code (or 128 plus its terminating signal). Closing the response reader during a recycle also wakes PID 1. Linux then kills and reaps the remaining namespace processes. The launcher waits for PID 1, so normal replacement waits for teardown and release of the session lock. Rust allows five seconds for the launcher to exit before forcing termination. Both waiting processes clear their capabilities. [Linux PID namespace semantics](https://man7.org/linux/man-pages/man7/pid_namespaces.7.html)
 
-The Rust supervisor transparently retries a read-only playback or context request once when the worker returns `worker_recycle`. It replaces the worker, restores its cached session and reissues the interrupted request. This prevents routine recycling from surfacing HTTP 409 failures to Gamdl clients. Any second recycle response or actual playback/context error is returned without further retries.
+## Operation budget and recovery
+
+The native worker owns a budget of 128 playback and context attempts by default. After authentication and input validation it charges one slot just before entering the native operation. A failed native call can therefore consume a slot. Session status, credentials and explicit close remain usable at the limit.
+
+The next budgeted request receives an internal `worker_recycle` with `restart_required` before the worker executes the operation. Rust holds the supervisor lock, replaces the worker, revalidates the previously authenticated session and submits the request once to the replacement. Gamdl sees the resulting playback or context response. A second recycle from a fresh worker remains a visible 409. Crashes, timeouts, malformed replies and native operation errors propagate to the caller. None establishes that the requested work was rejected before execution.
+
+If automatic session restoration fails, a protected request receives the restoration error. A later request can attempt recovery again after a transport or validation failure. A missing or expired cache clears the intent to restore. Explicit restore performs one validation, and explicit close skips recovery. Once an HTTP request acquires the worker, its bounded IPC transaction runs through cleanup even if the client disconnects. Overlapping callers retain the existing `503 worker_busy` behavior.
+
+A supervisor count of successful replies would miss charged failures. A native notification on the final charged response could save one local IPC exchange per generation, but replacement would still incur startup and authentication costs. Eager replacement would also incur those costs when the next action is close or the client goes idle. Changing the limit warrants a longer per-generation measurement of memory, threads, file descriptors, failures and restoration latency on representative workloads.
 
 ## Container deployment
 

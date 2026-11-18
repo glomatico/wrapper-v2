@@ -54,6 +54,8 @@ def reply(id_, value=None, error=None, auth=None, restart_required=False, retrya
 def main():
     global session
     assert len(sys.argv) == 2
+    budget = int(os.environ.get("WRAPPER_MOCK_BUDGET", "128"))
+    operations = 0
     while True:
         try:
             req = recv()
@@ -62,6 +64,15 @@ def main():
         id_ = req["id"]
         op = req["op"]
         params = req["params"]
+        if op in ("playback.get", "context.get"):
+            if session != "authenticated":
+                reply(id_, error="authentication_required")
+                continue
+            # 7777 injects a persistent recycle even on a fresh worker.
+            if operations >= budget or params["adam_id"] == "7777":
+                reply(id_, error="worker_recycle", restart_required=True)
+                return
+            operations += 1
         if op == "initialize":
             reply(id_, {"profile": PROFILE, "architecture":profile["architecture"],
                         "context_supported":profile["context_supported"],
@@ -116,34 +127,18 @@ def main():
             session = "authenticated"
             reply(id_, {"state": session, "storefront": "143441"})
         elif op == "playback.get":
-            marker_dir = os.environ.get("WRAPPER_MOCK_RECYCLE_ONCE_DIR")
-            marker = Path(marker_dir) / "playback-recycled" if marker_dir else None
-            if params["adam_id"] == "7777" and (marker is None or not marker.exists()):
-                if marker is not None:
-                    marker.touch()
-                reply(id_, error="worker_recycle", restart_required=True)
-                return
             if params["adam_id"] == "9999":
                 os._exit(70)
             if params["adam_id"] == "8888":
                 reply("wrong-request-id", {"songList": []})
                 continue
-            if session != "authenticated":
-                reply(id_, error="authentication_required")
+            if params["adam_id"] == "5555":
+                reply(id_, error="playback_unavailable")
             else:
                 reply(id_, {"songList": [{"id": params["adam_id"], "codec": "alac"}]})
         elif op == "context.get":
-            marker_dir = os.environ.get("WRAPPER_MOCK_RECYCLE_ONCE_DIR")
-            marker = Path(marker_dir) / "context-recycled" if marker_dir else None
-            if params["adam_id"] == "7777" and (marker is None or not marker.exists()):
-                if marker is not None:
-                    marker.touch()
-                reply(id_, error="worker_recycle", restart_required=True)
-                return
             if not profile["context_supported"]:
                 reply(id_,error="unsupported_capture_profile")
-            elif session != "authenticated":
-                reply(id_, error="authentication_required")
             else:
                 invalid = params["adam_id"] == "6666"
                 contract = profile["context_contract"]

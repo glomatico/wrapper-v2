@@ -108,31 +108,39 @@ class AutoAuthTests(unittest.TestCase):
         self.assertFalse(any(e.get("event") == "session.auto_auth_2fa_required"
                              for e in self.events()))
 
-    def test_authenticated_session_survives_worker_recycle(self):
+    def test_persistent_recycle_stops_after_one_retry(self):
         self.env.update(WRAPPER_USERNAME="test-account", WRAPPER_PASSWORD="test-password")
         self.launch()
         self.wait_for(lambda: any(e.get("event") == "session.auto_auth_restored"
                                   for e in self.events()))
-        self.assertEqual(self.request("GET", "/playback?adam_id=7777")[0], 409)
+        status, error = self.request("GET", "/playback?adam_id=7777")
+        self.assertEqual((status, error["error"]["code"]), (409, "worker_recycle"))
+        self.assertEqual(sum(e.get("event") == "worker.started" for e in self.events()), 2)
         self.assertEqual(self.request("GET", "/session")[1]["state"], "authenticated")
         self.assertEqual(self.request("GET", "/playback?adam_id=12345")[0], 200)
 
     def test_recycle_retries_interrupted_playback_and_context(self):
         self.env.update(WRAPPER_USERNAME="test-account", WRAPPER_PASSWORD="test-password",
-                        WRAPPER_MOCK_RECYCLE_ONCE_DIR=self.temp.name)
+                        WRAPPER_MOCK_BUDGET="1")
         self.launch()
         self.wait_for(lambda: any(e.get("event") == "session.auto_auth_restored"
                                   for e in self.events()))
-        status, playback = self.request("GET", "/playback?adam_id=7777")
-        self.assertEqual(status, 200)
-        self.assertEqual(playback["songList"][0]["id"], "7777")
-        status, context = self.request("GET", "/context?adam_id=7777&key_uri=skd://test")
+        self.assertEqual(self.request("GET", "/playback?adam_id=12345")[0], 200)
+        # The next generation spends its only slot on a genuine failed call.
+        status, error = self.request("GET", "/playback?adam_id=5555")
+        self.assertEqual((status, error["error"]["code"]), (404, "playback_unavailable"))
+        status, context = self.request("GET", "/context?adam_id=12345&key_uri=skd://test")
         self.assertEqual(status, 200)
         self.assertIn("ctx", context)
+        status, playback = self.request("GET", "/playback?adam_id=23456")
+        self.assertEqual(status, 200)
+        self.assertEqual(playback["songList"][0]["id"], "23456")
         self.assertEqual(self.request("GET", "/session")[1]["state"], "authenticated")
         events = self.events()
-        self.assertEqual(sum(e.get("event") == "worker.recycle_retry" for e in events), 2)
-        self.assertEqual(sum(e.get("event") == "session.recovered" for e in events), 2)
+        self.assertEqual([e["operation"] for e in events if e.get("event") == "worker.recycle_retry"],
+                         ["playback.get", "context.get", "playback.get"])
+        self.assertEqual(sum(e.get("event") == "session.recovered" for e in events), 3)
+        self.assertEqual(sum(e.get("event") == "worker.started" for e in events), 4)
 
     def test_missing_cached_session_does_not_fake_recovery(self):
         self.env["WRAPPER_MOCK_NO_CACHED_SESSION"] = "1"
@@ -165,25 +173,29 @@ class AutoAuthTests(unittest.TestCase):
                 fault.unlink()
                 self.assertEqual(self.request("GET", "/playback?adam_id=12345")[0], 200)
 
-    def test_close_after_crash_skips_automatic_restore(self):
+    def test_explicit_restore_and_close_after_crash_skip_automatic_restore(self):
         self.launch()
         self.wait_for(lambda: self.request("GET", "/session")[0] == 200)
         self.assertEqual(self.request("POST", "/session/restore")[0], 200)
+        self.assertEqual(self.request("GET", "/playback?adam_id=9999")[0], 503)
+        self.assertEqual(self.request("POST", "/session/restore")[1]["state"], "authenticated")
+        self.assertFalse(any(e.get("event") == "session.recovered" for e in self.events()))
         self.assertEqual(self.request("GET", "/playback?adam_id=9999")[0], 503)
         (Path(self.temp.name) / "restore-fault").write_text("eof")
         self.assertEqual(self.request("POST", "/session/close")[0], 200)
         self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
 
     def test_client_disconnect_during_recycle_keeps_ipc_exclusive(self):
-        self.env["WRAPPER_MOCK_RECYCLE_ONCE_DIR"] = self.temp.name
+        self.env["WRAPPER_MOCK_BUDGET"] = "1"
         self.launch()
         self.wait_for(lambda: self.request("GET", "/session")[0] == 200)
         self.assertEqual(self.request("POST", "/session/restore")[0], 200)
         gate = Path(self.temp.name) / "pause-restore"
+        self.assertEqual(self.request("GET", "/playback?adam_id=12345")[0], 200)
         gate.touch()
         try:
             with socket.create_connection(("127.0.0.1", self.port)) as client:
-                client.sendall(b"GET /playback?adam_id=7777 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                client.sendall(b"GET /playback?adam_id=23456 HTTP/1.1\r\nHost: localhost\r\n\r\n")
                 self.wait_for((gate.parent / "restoring").exists)
                 status, error = self.request("GET", "/session")
                 self.assertEqual((status, error["error"]["code"]), (503, "worker_busy"))
