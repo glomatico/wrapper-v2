@@ -11,7 +11,7 @@ RUN apt-get update \
 COPY --chmod=0755 build/package/${TARGETARCH}/wrapperd /usr/local/bin/wrapperd
 COPY --chmod=0755 build/package/${TARGETARCH}/worker-launch /usr/local/bin/worker-launch
 
-# Only the launcher needs filesystem namespace/chroot capabilities. The HTTP
+# Only the launcher needs namespace, mount and chroot capabilities. The HTTP
 # server runs as an ordinary UID; successful exec of the native worker drops
 # the launcher's file capabilities again.
 RUN setcap cap_sys_admin,cap_sys_chroot+ep /usr/local/bin/worker-launch
