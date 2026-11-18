@@ -159,29 +159,39 @@ impl Supervisor {
         })
     }
 
-    pub async fn call(&self, op: &str, params: Value) -> Result<Value, ApiError> {
-        let mut control = self.control.try_lock().map_err(|_| busy())?;
-        // Playback and context retrieval are read-only. Native workers recycle
-        // after their request budget is exhausted, so transparently retry the
-        // interrupted request once after replacing and restoring the worker.
-        // Otherwise the expected recycle leaks as HTTP 409 to download clients.
-        let mut retry_params = matches!(op, "playback.get" | "context.get").then(|| params.clone());
+    pub async fn call(
+        self: &Arc<Self>,
+        op: &'static str,
+        params: Value,
+    ) -> Result<Value, ApiError> {
+        let control = self.control.clone().try_lock_owned().map_err(|_| busy())?;
+        let supervisor = Arc::clone(self);
+        // An HTTP disconnect can cancel this future during a partial frame.
+        // Keep the bounded IPC transaction and its lock alive until cleanup.
+        tokio::spawn(async move { supervisor.call_locked(control, op, params).await })
+            .await
+            .map_err(|_| ApiError::worker_unavailable("worker_unavailable"))?
+    }
+
+    async fn call_locked(
+        &self,
+        mut control: OwnedMutexGuard<Controller>,
+        op: &str,
+        params: Value,
+    ) -> Result<Value, ApiError> {
+        // The native budget guard explicitly rejects these operations before
+        // executing them. EOF, timeouts and other errors give no such guarantee.
+        let retry_params = matches!(op, "playback.get" | "context.get").then(|| params.clone());
         let mut result = control.command(&self.settings, op, params).await;
-        if matches!(&result, Ok(Packet::Error(error))
-            if error.code == "worker_recycle" && error.restart_required && retry_params.is_some())
-        {
-            tracing::info!(event = "worker.recycle_retry", operation = op);
-            control.discard().await;
-            result = control
-                .command(
-                    &self.settings,
-                    op,
-                    retry_params.take().expect("replay parameters"),
-                )
-                .await;
-        }
         if let Some(mut params) = retry_params {
-            wipe_json_value(&mut params);
+            if matches!(&result, Ok(Packet::Error(e)) if e.code == "worker_recycle" && e.restart_required)
+            {
+                tracing::info!(event = "worker.recycle_retry", operation = op);
+                control.discard().await;
+                result = control.command(&self.settings, op, params).await;
+            } else {
+                wipe_json_value(&mut params);
+            }
         }
         match result {
             Ok(Packet::Success(value)) => {

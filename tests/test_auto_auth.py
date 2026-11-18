@@ -174,6 +174,27 @@ class AutoAuthTests(unittest.TestCase):
         self.assertEqual(self.request("POST", "/session/close")[0], 200)
         self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
 
+    def test_client_disconnect_during_recycle_keeps_ipc_exclusive(self):
+        self.env["WRAPPER_MOCK_RECYCLE_ONCE_DIR"] = self.temp.name
+        self.launch()
+        self.wait_for(lambda: self.request("GET", "/session")[0] == 200)
+        self.assertEqual(self.request("POST", "/session/restore")[0], 200)
+        gate = Path(self.temp.name) / "pause-restore"
+        gate.touch()
+        try:
+            with socket.create_connection(("127.0.0.1", self.port)) as client:
+                client.sendall(b"GET /playback?adam_id=7777 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                self.wait_for((gate.parent / "restoring").exists)
+                status, error = self.request("GET", "/session")
+                self.assertEqual((status, error["error"]["code"]), (503, "worker_busy"))
+            # The original client has gone away during the restore IPC read.
+        finally:
+            gate.unlink()
+        self.wait_for(lambda: any(e.get("event") == "session.recovered" for e in self.events()))
+        self.wait_for(lambda: self.request("GET", "/session") == (200, {
+            "state": "authenticated", "storefront": "143441"}))
+        self.assertFalse(any(e.get("code") == "worker_protocol_error" for e in self.events()))
+
     def test_auto_auth_2fa_stays_pending_until_manually_completed(self):
         self.env.update(WRAPPER_USERNAME="twofactor", WRAPPER_PASSWORD="some-password",
                         WRAPPER_MOCK_NO_CACHED_SESSION="1")

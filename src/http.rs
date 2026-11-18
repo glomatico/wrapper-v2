@@ -231,7 +231,7 @@ impl Api {
 
     async fn result(
         &self,
-        operation: &str,
+        operation: &'static str,
         params: Value,
     ) -> Result<(StatusCode, Value), ApiError> {
         Ok((

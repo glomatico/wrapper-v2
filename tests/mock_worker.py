@@ -5,6 +5,7 @@ import json
 import os
 import struct
 import sys
+import time
 
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"tools"))
@@ -74,6 +75,13 @@ def main():
                 reply(id_, {"dev_token": "mock-developer-token",
                             "music_user_token": "mock-media-user-token"})
         elif op == "session.restore":
+            gate = Path(sys.argv[1]) / "pause-restore"
+            if gate.exists():
+                (gate.parent / "restoring").touch()
+                for _ in range(500):
+                    if not gate.exists():
+                        break
+                    time.sleep(.01)
             fault = Path(sys.argv[1]) / "restore-fault"
             if fault.exists():
                 if fault.read_text() == "eof":
