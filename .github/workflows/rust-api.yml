@@ -21,6 +21,10 @@ jobs:
           python-version: "3.12"
       - name: Rust formatting
         run: cargo fmt --check
+      - name: Linux worker namespace and lifecycle tests
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror native/launcher.cpp -o /tmp/worker-launch
+          sudo python3 tests/launcher_namespace.py /tmp/worker-launch -v
       - name: Rust lint
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Rust unit tests
