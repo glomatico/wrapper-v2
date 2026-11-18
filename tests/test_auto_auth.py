@@ -117,6 +117,23 @@ class AutoAuthTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/session")[1]["state"], "authenticated")
         self.assertEqual(self.request("GET", "/playback?adam_id=12345")[0], 200)
 
+    def test_recycle_retries_interrupted_playback_and_context(self):
+        self.env.update(WRAPPER_USERNAME="test-account", WRAPPER_PASSWORD="test-password",
+                        WRAPPER_MOCK_RECYCLE_ONCE_DIR=self.temp.name)
+        self.launch()
+        self.wait_for(lambda: any(e.get("event") == "session.auto_auth_restored"
+                                  for e in self.events()))
+        status, playback = self.request("GET", "/playback?adam_id=7777")
+        self.assertEqual(status, 200)
+        self.assertEqual(playback["songList"][0]["id"], "7777")
+        status, context = self.request("GET", "/context?adam_id=7777&key_uri=skd://test")
+        self.assertEqual(status, 200)
+        self.assertIn("ctx", context)
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "authenticated")
+        events = self.events()
+        self.assertEqual(sum(e.get("event") == "worker.recycle_retry" for e in events), 2)
+        self.assertEqual(sum(e.get("event") == "session.recovered" for e in events), 2)
+
     def test_missing_cached_session_does_not_fake_recovery(self):
         self.env["WRAPPER_MOCK_NO_CACHED_SESSION"] = "1"
         self.launch()

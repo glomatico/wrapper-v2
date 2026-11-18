@@ -103,7 +103,11 @@ def main():
             session = "authenticated"
             reply(id_, {"state": session, "storefront": "143441"})
         elif op == "playback.get":
-            if params["adam_id"] == "7777":
+            marker_dir = os.environ.get("WRAPPER_MOCK_RECYCLE_ONCE_DIR")
+            marker = Path(marker_dir) / "playback-recycled" if marker_dir else None
+            if params["adam_id"] == "7777" and (marker is None or not marker.exists()):
+                if marker is not None:
+                    marker.touch()
                 reply(id_, error="worker_recycle", restart_required=True)
                 return
             if params["adam_id"] == "9999":
@@ -116,6 +120,13 @@ def main():
             else:
                 reply(id_, {"songList": [{"id": params["adam_id"], "codec": "alac"}]})
         elif op == "context.get":
+            marker_dir = os.environ.get("WRAPPER_MOCK_RECYCLE_ONCE_DIR")
+            marker = Path(marker_dir) / "context-recycled" if marker_dir else None
+            if params["adam_id"] == "7777" and (marker is None or not marker.exists()):
+                if marker is not None:
+                    marker.touch()
+                reply(id_, error="worker_recycle", restart_required=True)
+                return
             if not profile["context_supported"]:
                 reply(id_,error="unsupported_capture_profile")
             elif session != "authenticated":

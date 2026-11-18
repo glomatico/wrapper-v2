@@ -18,6 +18,8 @@ The worker inherits the existing framed IPC on stdin and stdout. Namespace PID 1
 
 When the worker exits, PID 1 returns its exit code (or 128 plus its terminating signal). Closing the response reader during a recycle also wakes PID 1. Linux then kills and reaps the remaining namespace processes. The launcher waits for PID 1, so normal replacement waits for teardown and release of the session lock. Rust allows five seconds for the launcher to exit before forcing termination. Both waiting processes clear their capabilities. [Linux PID namespace semantics](https://man7.org/linux/man-pages/man7/pid_namespaces.7.html)
 
+The Rust supervisor transparently retries a read-only playback or context request once when the worker returns `worker_recycle`. It replaces the worker, restores its cached session and reissues the interrupted request. This prevents routine recycling from surfacing HTTP 409 failures to Gamdl clients. Any second recycle response or actual playback/context error is returned without further retries.
+
 ## Container deployment
 
 Package the rebuilt Linux `wrapperd` and `worker-launch` for the target architecture. Reuse the existing staged Android rootfs, private session volume and device configuration. The Compose service enables `init: true` so the container init can reap a launcher or namespace init orphaned by an abrupt kill. Use `--init` for an equivalent `docker run`.
