@@ -639,8 +639,16 @@ impl Controller {
 
     async fn discard(&mut self) {
         if let Some(mut worker) = self.worker.take() {
-            let _ = worker.child.kill().await;
-            let _ = worker.child.wait().await;
+            // Closing the response reader tells namespace PID 1 to exit. The
+            // launcher waits for kernel teardown before we start a replacement.
+            drop(worker.stdout);
+            drop(worker.stdin);
+            if timeout(Duration::from_secs(5), worker.child.wait())
+                .await
+                .is_err()
+            {
+                let _ = worker.child.kill().await;
+            }
             tracing::info!(event = "worker.stopped");
         }
     }

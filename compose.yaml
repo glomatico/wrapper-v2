@@ -7,6 +7,8 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Reap an orphaned launcher or namespace init after an abrupt supervisor kill.
+    init: true
     # Docker's daemon need not be rootless. The HTTP server itself runs as a
     # non-root UID, while its native launcher temporarily receives capabilities.
     user: "${WRAPPER_UID:-1000}:${WRAPPER_GID:-1000}"
