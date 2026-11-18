@@ -193,7 +193,6 @@ impl Supervisor {
                     tracing::info!(event = "session.restored");
                 }
                 if op == "session.close" {
-                    control.restore_after_restart = false;
                     tracing::info!(event = "session.closed");
                     control.discard().await;
                 }
@@ -299,7 +298,10 @@ impl Supervisor {
         let mut reply = Some(first);
         let mut terminal_session = None;
         let result: Result<(), ApiError> = async {
-            control.ensure(&self.settings).await?;
+            control.ensure(&self.settings, "session.login").await?;
+            // Once login starts its terminal reply determines the new state.
+            // A failure while starting the worker can still recover later.
+            control.restore_after_restart = false;
             let id = control.allocate_id();
             let params = json!({"username":username.as_str(),"password":password.as_str()});
             timeout(
@@ -378,7 +380,6 @@ impl Supervisor {
         if let Err(error) = &result {
             tracing::warn!(event = "worker.error", operation = "session.login",
                 code = %error.code);
-            control.restore_after_restart = false;
             control.discard().await;
         } else {
             control.restore_after_restart = terminal_session
@@ -425,7 +426,7 @@ impl Controller {
         id.to_string()
     }
 
-    async fn ensure(&mut self, config: &Config) -> Result<(), ApiError> {
+    async fn ensure(&mut self, config: &Config, op: &str) -> Result<(), ApiError> {
         if let Some(worker) = self.worker.as_mut() {
             if worker
                 .child
@@ -493,12 +494,11 @@ impl Controller {
             Packet::Error(error) => return Err(error),
             _ => return Err(ApiError::worker_unavailable("unsupported_worker_profile")),
         }
-        if self.restore_after_restart {
+        if self.restore_after_restart && op != "session.restore" {
             // The worker has no in-memory authentication after recycling. The
             // saved native session survives in session_dir, just as it does
             // after a full container restart. Do not silently restore sessions
             // on first startup or after an explicit session.close.
-            self.restore_after_restart = false;
             let id = self.allocate_id();
             let restored = timeout(COMMAND_LIMIT, async {
                 self.send(&id, "session.restore", json!({}), 120000).await?;
@@ -510,20 +510,35 @@ impl Controller {
                 Packet::Success(value)
                     if value.get("state").and_then(Value::as_str) == Some("authenticated") =>
                 {
-                    self.restore_after_restart = true;
                     tracing::info!(event = "session.recovered");
                 }
                 Packet::Error(error) => {
                     tracing::warn!(event = "session.recovery_failed", code = %error.code);
-                    if error.restart_required {
-                        return Err(error);
+                    // A missing or expired cache is definitive. Status can
+                    // still report the replacement's actual session state.
+                    // On transient or ambiguous failures keep recovery armed
+                    // for a later request. Never dispatch protected work here.
+                    if matches!(
+                        error.code.as_str(),
+                        "no_cached_session" | "session_expired" | "authentication_required"
+                    ) {
+                        self.restore_after_restart = false;
+                        if op == "session.status" && !error.restart_required {
+                            return Ok(());
+                        }
                     }
+                    // An explicit login can repair a rejected cache.
+                    if op == "session.login" && !error.restart_required {
+                        return Ok(());
+                    }
+                    return Err(error);
                 }
                 Packet::Success(_) => {
                     tracing::warn!(
                         event = "session.recovery_failed",
                         code = "not_authenticated"
                     );
+                    return Err(ApiError::worker_unavailable("worker_protocol_error"));
                 }
                 Packet::Challenge { .. } => {
                     return Err(ApiError::worker_unavailable("unexpected_worker_event"));
@@ -539,7 +554,10 @@ impl Controller {
         op: &str,
         params: Value,
     ) -> Result<Packet, ApiError> {
-        self.ensure(config).await?;
+        if op == "session.close" {
+            self.restore_after_restart = false;
+        }
+        self.ensure(config, op).await?;
         let id = self.allocate_id();
         timeout(COMMAND_LIMIT, async {
             self.send(&id, op, params, 120000).await?;

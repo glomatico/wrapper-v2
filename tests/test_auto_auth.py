@@ -143,11 +143,36 @@ class AutoAuthTests(unittest.TestCase):
                                        {"username": "mock-account", "password": "mock-password"})
         self.assertEqual(status, 200)
         self.assertEqual(session["state"], "authenticated")
-        self.assertEqual(self.request("GET", "/playback?adam_id=7777")[0], 409)
+        status, error = self.request("GET", "/playback?adam_id=7777")
+        self.assertEqual((status, error["error"]["code"]), (404, "no_cached_session"))
         self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
         self.assertEqual(self.request("GET", "/playback?adam_id=12345")[0], 403)
         failures = [e for e in self.events() if e.get("event") == "session.recovery_failed"]
         self.assertEqual(len(failures), 1)
+
+    def test_failed_recovery_preserves_error_and_next_request_can_restore(self):
+        self.launch()
+        self.wait_for(lambda: self.request("GET", "/session")[0] == 200)
+        self.assertEqual(self.request("POST", "/session/restore")[0], 200)
+        fault = Path(self.temp.name) / "restore-fault"
+        for mode, expected in [("validation", (502, "session_validation_failed")),
+                               ("eof", (503, "worker_io_error"))]:
+            with self.subTest(mode=mode):
+                fault.write_text(mode)
+                status, error = self.request("GET", "/playback?adam_id=7777")
+                self.assertEqual((status, error["error"]["code"]), expected)
+                self.assertTrue(error["error"]["retryable"])
+                fault.unlink()
+                self.assertEqual(self.request("GET", "/playback?adam_id=12345")[0], 200)
+
+    def test_close_after_crash_skips_automatic_restore(self):
+        self.launch()
+        self.wait_for(lambda: self.request("GET", "/session")[0] == 200)
+        self.assertEqual(self.request("POST", "/session/restore")[0], 200)
+        self.assertEqual(self.request("GET", "/playback?adam_id=9999")[0], 503)
+        (Path(self.temp.name) / "restore-fault").write_text("eof")
+        self.assertEqual(self.request("POST", "/session/close")[0], 200)
+        self.assertEqual(self.request("GET", "/session")[1]["state"], "logged_out")
 
     def test_auto_auth_2fa_stays_pending_until_manually_completed(self):
         self.env.update(WRAPPER_USERNAME="twofactor", WRAPPER_PASSWORD="some-password",

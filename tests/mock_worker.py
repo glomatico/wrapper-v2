@@ -37,10 +37,10 @@ def send(value):
     sys.stdout.buffer.flush()
 
 
-def reply(id_, value=None, error=None, auth=None, restart_required=False):
+def reply(id_, value=None, error=None, auth=None, restart_required=False, retryable=False):
     if error:
         packet={"v": 1, "id": id_, "ok": False, "error": {
-            "code": error, "retryable": restart_required,
+            "code": error, "retryable": retryable or restart_required,
             "restart_required": restart_required,
         }}
         if auth is not None:
@@ -74,7 +74,12 @@ def main():
                 reply(id_, {"dev_token": "mock-developer-token",
                             "music_user_token": "mock-media-user-token"})
         elif op == "session.restore":
-            if os.environ.get("WRAPPER_MOCK_NO_CACHED_SESSION") == "1":
+            fault = Path(sys.argv[1]) / "restore-fault"
+            if fault.exists():
+                if fault.read_text() == "eof":
+                    return
+                reply(id_, error="session_validation_failed", retryable=True)
+            elif os.environ.get("WRAPPER_MOCK_NO_CACHED_SESSION") == "1":
                 reply(id_, error="no_cached_session")
             else:
                 session = "authenticated"
