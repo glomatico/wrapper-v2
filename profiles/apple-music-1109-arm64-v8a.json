@@ -110,7 +110,7 @@
     "lib64/libvorbisidec.so": "bfba62d8598022b778805482e5c1b4c6297e80bf7a58634ccfa3e3561927c3bb",
     "lib64/libwilhelm.so": "8418709da5ec21fae5dbfd73da7dce813d5b2635b7438a7346251392f27e769c",
     "lib64/libz.so": "26f0f06e40b212bb55f17eb4df812438b3e993e6485f6267bdd4225d2dfda8e1",
-    "usr/share/zoneinfo/tzdata": "586f372496315b1563e62a1a28d18adf65dea5a7b7453d7e0a91df9dfc2c8482"
+    "usr/share/zoneinfo/tzdata": "d67e16abbc9c83ec0439e99e056e2d06616f0190fe218a44b74bbb2be865627a"
   },
   "linux_architecture": "aarch64",
   "rust_target": "aarch64-unknown-linux-gnu",

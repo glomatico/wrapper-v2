@@ -1,0 +1,3 @@
+# Keep official third-party notice files byte-for-byte identical to Google's
+# distributions, including their original trailing whitespace and line endings.
+vendor/android-system/*/NOTICE.txt -text -whitespace

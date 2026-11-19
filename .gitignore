@@ -10,6 +10,7 @@
 *.apk
 *.apkm
 *.so
+!/vendor/android-system/*/lib64/*.so
 *.a
 /.env
 /.env.*
