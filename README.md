@@ -23,13 +23,13 @@ The server **does not decrypt or download media**. Decryption, when supported, t
 | Host | Linux, `x86_64` or `aarch64` |
 | Deployment | Docker with Compose (recommended) |
 | Apple Music | **Version 3.6.0-beta, build 1109**, for the selected architecture |
-| Android runtime | Architecture-matched Android API 21 system files listed in `profiles/` |
+| Android runtime | Bundled, architecture-specific Android system files (x86-64: API 21; ARM64: API 22) |
 | Native build | Android NDK **r23b**, CMake, Ninja, C++17 compiler, Python 3, and pinned CMake dependencies |
 | Server build | Rust toolchain and, for cross-compilation, the corresponding Linux cross-compiler and Rust target |
 
-The Apple Music build and Android runtime are **strictly pinned**. Other APK versions and substitute libraries are not supported merely because they have the same architecture.
+The Apple Music build and bundled Android runtime are **strictly pinned**. Other APK versions and substitute libraries are not supported merely because they have the same architecture.
 
-**You must supply your own authorized copies of the APK and Android system files.** This repository, its Docker image, and its Git history do not include them or any login/session data. The staging utility verifies hashes before installing files into the local rootfs.
+**You must supply your own authorized copy of the pinned Apple Music APK.** The Android system libraries are bundled from verified official Google system images, with their third-party notices. Apple libraries, account credentials, and sessions are **not** included in the repository or Docker images. The staging utility verifies hashes before installing any files into the local rootfs. See [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Getting started
 
@@ -44,10 +44,9 @@ git clone https://github.com/glomatico/wrapper-v2.git
 cd wrapper-v2
 export ARCH=x86_64 # or arm64-v8a
 export APPLE_MUSIC_APK=/path/to/your/Apple-Music.apkm
-export ANDROID_SYSTEM=/path/to/your/android-system
 ```
 
-The `ANDROID_SYSTEM` directory must contain the pinned `bin/`, `lib64/`, and `usr/` files expected by `profiles/apple-music-1109-<architecture>.json`. The APK may be the supported split-package archive or the verified architecture-specific APK.
+The Android system libraries are already included in `vendor/android-system/<architecture>/`. The APK may be the supported split-package archive or the verified architecture-specific APK.
 
 ```bash
 python3 tools/prepare_rootfs.py \
@@ -74,11 +73,10 @@ For an ARM64 build on an x86-64 Linux machine, install an `aarch64-linux-gnu-g++
 ```bash
 python3 tools/prepare_rootfs.py \
   --arch "$ARCH" \
-  --apk "$APPLE_MUSIC_APK" \
-  --android-system "$ANDROID_SYSTEM"
+  --apk "$APPLE_MUSIC_APK"
 ```
 
-The utility creates `build/$ARCH/rootfs` and refuses to overwrite an existing destination. Keep this directory **private**; it contains third-party binaries and will be mounted into the container, not bundled into the image.
+The utility creates `build/$ARCH/rootfs` using the bundled, SHA-256-verified Android system files and refuses to overwrite an existing destination. Keep this directory **private**; it contains Apple libraries and will be mounted into the container, not bundled into the image. Advanced users can override the Android binaries with `--android-system /path/to/system`, but their hashes must still match the selected profile.
 
 ### 4. Build the Docker image
 
@@ -186,4 +184,4 @@ The automated HTTP tests use a **synthetic worker**; they do not require Apple a
 
 ## License
 
-Wrapper v2's original source code is released under [The Unlicense](LICENSE). Apple Music, Android system files, and other third-party dependencies remain subject to their respective owners' licenses and terms. This project is not affiliated with or endorsed by Apple.
+Wrapper v2's original source code is released under [The Unlicense](LICENSE). The bundled Android system files retain their own licenses and required notices, documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Apple's proprietary libraries are not redistributed. This project is not affiliated with or endorsed by Apple.

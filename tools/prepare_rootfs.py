@@ -72,7 +72,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--apk",type=Path,required=True)
     p.add_argument("--arch",help="Android ABI or Linux architecture; default is native host")
-    p.add_argument("--android-system",type=Path,help="directory containing bin/, lib64/, usr/")
+    p.add_argument("--android-system",type=Path,
+                   help="override bundled verified Android system binaries (bin/, lib64/, usr/)")
     p.add_argument("--extract-libraries",type=Path,help="only extract verified Apple libraries into a new directory")
     p.add_argument("--worker",type=Path)
     p.add_argument("--output",type=Path)
@@ -87,8 +88,8 @@ def main():
             for name,data in files.items():(a.extract_libraries/name).write_bytes(data)
             print("Extracted verified Apple Music build 1109 "+pins["architecture"]+" libraries.")
             return
-        if not a.android_system:p.error("--android-system is required for rootfs staging")
-        stage(a.apk,a.android_system,a.worker or build/"android/apple-music-worker",a.output or build/"rootfs",a.ca_bundle,pins)
+        android_system=a.android_system or ROOT/"vendor/android-system"/pins["architecture"]
+        stage(a.apk,android_system,a.worker or build/"android/apple-music-worker",a.output or build/"rootfs",a.ca_bundle,pins)
     except (ValueError,OSError,zipfile.BadZipFile) as e:p.exit(1,str(e)+"\n")
     print("Staged verified "+pins["architecture"]+" rootfs; no account data included.")
 if __name__=="__main__":main()
