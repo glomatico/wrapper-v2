@@ -158,7 +158,7 @@ For development, `tools/build.sh` can still build the native worker and launcher
 Wrapper v2 owes a great deal to the projects and people who helped build the Apple Music wrapper ecosystem:
 
 - **[zhaarey/wrapper](https://github.com/zhaarey/wrapper)** — the original Wrapper project, which laid the groundwork for running Apple Music's Android components without a full Android emulator.
-- **WorldOfDecrypt / [WorldObservationLog](https://github.com/WorldObservationLog)** — for their work on [Wrapper and Wrapper Lite](https://github.com/WorldObservationLog/wrapper/tree/lite), and on the [Temari](https://github.com/WorldObservationLog/Temari) decryption library and related tooling.
+- **[WorldObservationLog](https://github.com/WorldObservationLog)** — for their work on [Wrapper and Wrapper Lite](https://github.com/WorldObservationLog/wrapper/tree/lite), and on the [Temari](https://github.com/WorldObservationLog/Temari) decryption library and related tooling.
 
 Thank you to their contributors and the wider community for sharing their research and making continued development possible. Wrapper v2 1.0.0 is a rewrite with its own implementation; these acknowledgements recognize the preceding work and ideas, not an endorsement of this project by the upstream authors.
 
