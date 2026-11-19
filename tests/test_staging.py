@@ -2,6 +2,7 @@
 """Safe source/staging tests. No Apple binaries or account required."""
 import hashlib
 import importlib.util
+import io
 import tempfile
 import unittest
 import warnings
@@ -42,6 +43,27 @@ class StagingTests(unittest.TestCase):
             with self.subTest(abi=abi), tempfile.TemporaryDirectory() as directory:
                 path, pins = self.fixture(directory, abi=abi)
                 self.assertEqual(len(stage.extract_apple(path,pins)["libTest.so"]), 64)
+
+    def test_verified_apkm_bundle(self):
+        for abi in ("x86_64", "arm64-v8a"):
+            with self.subTest(abi=abi), tempfile.TemporaryDirectory() as directory:
+                split_path, pins = self.fixture(directory, abi=abi)
+                pins = dict(pins, base_manifest_sha256=stage.digest(b"synthetic base"))
+                base_bytes = io.BytesIO()
+                with zipfile.ZipFile(base_bytes, "w") as base:
+                    base.writestr("AndroidManifest.xml", b"synthetic base")
+                bundle = Path(directory) / "fixture.apkm"
+                with zipfile.ZipFile(bundle, "w") as archive:
+                    archive.writestr("base.apk", base_bytes.getvalue())
+                    archive.write(split_path, pins["apk_split"])
+                self.assertEqual(len(stage.extract_apple(bundle, pins)["libTest.so"]), 64)
+
+    def test_standalone_apk_with_base_manifest_and_native_libraries(self):
+        for abi in ("x86_64", "arm64-v8a"):
+            with self.subTest(abi=abi), tempfile.TemporaryDirectory() as directory:
+                path, pins = self.fixture(directory, abi=abi, manifest=b"synthetic base")
+                pins = dict(pins, base_manifest_sha256=stage.digest(b"synthetic base"))
+                self.assertEqual(len(stage.extract_apple(path, pins)["libTest.so"]), 64)
 
     def test_wrong_architecture(self):
         with tempfile.TemporaryDirectory() as directory:

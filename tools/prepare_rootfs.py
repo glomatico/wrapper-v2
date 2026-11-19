@@ -9,8 +9,10 @@ def digest(data):return hashlib.sha256(data).hexdigest()
 def extract_apple(source, pins=None):
     pins = pins or PINS
     split = pins["apk_split"]
+    split_in_bundle = False
     with zipfile.ZipFile(source) as outer:
         if split in outer.namelist():
+            split_in_bundle = True
             if "base.apk" not in outer.namelist() or outer.getinfo("base.apk").file_size>128*1024*1024:raise ValueError("missing or oversized base APK")
             with zipfile.ZipFile(io.BytesIO(outer.read("base.apk"))) as base:
                 if digest(base.read("AndroidManifest.xml"))!=pins["base_manifest_sha256"]:raise ValueError("unsupported APK build")
@@ -19,7 +21,12 @@ def extract_apple(source, pins=None):
             archive=zipfile.ZipFile(io.BytesIO(outer.read(info)))
         else:archive=outer
         try:
-            if "AndroidManifest.xml" not in archive.namelist() or digest(archive.read("AndroidManifest.xml"))!=pins["split_manifest_sha256"]:raise ValueError("unsupported APK architecture/build")
+            # A standalone APK may be a pinned architecture split or an APK
+            # whose base manifest and architecture-specific native libraries
+            # are packaged together. An APKM must have the exact pinned split.
+            expected_manifests = {pins["split_manifest_sha256"]}
+            if not split_in_bundle: expected_manifests.add(pins["base_manifest_sha256"])
+            if "AndroidManifest.xml" not in archive.namelist() or digest(archive.read("AndroidManifest.xml")) not in expected_manifests:raise ValueError("unsupported APK architecture/build")
             files={}
             for name,expected in pins["apple_libraries"].items():
                 path="lib/"+pins["architecture"]+"/"+name

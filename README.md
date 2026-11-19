@@ -34,29 +34,30 @@ The Apple Music build and bundled Android runtime are **strictly pinned**. Other
 
 ## Getting started
 
-The example below builds an x86-64 image. For ARM64, use the `--arch arm64-v8a` flag instead. **No local Android NDK, Rust toolchain, or Android system image is needed.** Docker compiles both architectures with an x86-64 NDK builder. Cross-architecture builds also require QEMU/binfmt emulation for the target image's runtime setup, or a remote multi-platform Buildx builder. On an x86-64 Linux host without ARM64 emulation, enable it with `docker run --privileged --rm tonistiigi/binfmt --install arm64` (this registers a host-level emulator). Docker Desktop may already provide this support.
+The build helper defaults to your host architecture. For ARM64, use the `--arch arm64-v8a` flag instead. **No local Android NDK, Rust toolchain, or Android system image is needed.** Docker compiles both architectures with an x86-64 NDK builder. Cross-architecture builds also require QEMU/binfmt emulation for the target image's runtime setup, or a remote multi-platform Buildx builder. On an x86-64 Linux host without ARM64 emulation, enable it with `docker run --privileged --rm tonistiigi/binfmt --install arm64` (this registers a host-level emulator). Docker Desktop may already provide this support.
 
-### 1. Obtain the supported Apple Music APK
+### 1. Obtain the supported Apple Music APK or APKM
 
-Clone this repository and choose the correct architecture:
+Clone this repository and obtain your authorized Apple Music **3.6.0-beta (build 1109)** APK/APKM:
 
 ```bash
 git clone https://github.com/glomatico/wrapper-v2.git
 cd wrapper-v2
-export APPLE_MUSIC_APK=/path/to/your/Apple-Music.apkm
 ```
 
-Provide either the supported APKM bundle (containing `base.apk` and the architecture split) or the verified architecture-specific APK. The Android system files are already in `vendor/android-system/`; both the APK libraries and Android binaries are checked against pinned SHA-256 hashes.
+Provide either an `.apkm` bundle (containing `base.apk` and the correct architecture split) or a standalone `.apk` with the pinned architecture-specific native libraries. A `base.apk` taken alone from a split bundle may not contain the required libraries. The Android system files are already in `vendor/android-system/`; the APK manifest and individual Apple libraries are verified against pinned SHA-256 hashes.
 
 ### 2. Build everything in Docker
 
 ```bash
-./tools/build-docker.sh --arch x86_64
-# For ARM64 instead:
-# ./tools/build-docker.sh --arch arm64-v8a
+./tools/build-docker.sh /path/to/AppleMusic.apk
+# Or an APKM bundle:
+# ./tools/build-docker.sh /path/to/AppleMusic.apkm
+# For an ARM64 image:
+# ./tools/build-docker.sh /path/to/AppleMusic.apkm --arch arm64-v8a
 ```
 
-The multi-stage Docker build installs the pinned NDK and a Rust toolchain, compiles the native worker, Linux launcher, and Rust supervisor, and assembles the complete Android rootfs **inside the image**. The APK is bind-mounted read-only from its isolated named build context (and its SHA-256 controls cache invalidation); the raw APK is **not copied into an image layer**. The Docker builder still receives the archive, so use only a trusted, private builder. The verified Apple libraries extracted from it are present in the resulting runtime image.
+The file path is passed directly to the build script; no environment variable is required. The multi-stage Docker build installs the pinned NDK and a Rust toolchain, compiles the native worker, Linux launcher, and Rust supervisor, and assembles the complete Android rootfs **inside the image**. The APK or APKM is bind-mounted read-only from its isolated named build context (and its SHA-256 controls cache invalidation); the raw package is **not copied into an image layer**. The Docker builder still receives the archive, so use only a trusted, private builder. The verified Apple libraries extracted from it are present in the resulting runtime image.
 
 The generated image is `wrapper-v2:1.0.0-local-amd64` for x86-64 or `wrapper-v2:1.0.0-local-arm64` for ARM64. It is also tagged `wrapper-v2:local`, which Docker Compose uses automatically. Initial builds download the Android NDK and toolchains and therefore require substantial time, network access, and disk space; subsequent builds can reuse Docker layer caches.
 

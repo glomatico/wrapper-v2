@@ -43,17 +43,17 @@ WORKDIR /work
 COPY . .
 
 # The APK's digest is also a cache key. No password or session is supplied.
-RUN --mount=type=bind,from=apple_apk,source=AppleMusic.apkm,target=/run/apple-music.apkm,readonly \
+RUN --mount=type=bind,from=apple_apk,source=AppleMusic.package,target=/run/apple-music.package,readonly \
     set -eu; \
     test -n "$APPLE_APK_SHA256"; \
-    echo "$APPLE_APK_SHA256  /run/apple-music.apkm" | sha256sum -c -; \
+    echo "$APPLE_APK_SHA256  /run/apple-music.package" | sha256sum -c -; \
     case "$TARGETARCH" in \
       amd64) arch=x86_64 ;; \
       arm64) arch=arm64-v8a ;; \
       *) echo "Unsupported Docker architecture: $TARGETARCH" >&2; exit 1 ;; \
     esac; \
     python3 tools/prepare_rootfs.py --arch "$arch" \
-      --apk /run/apple-music.apkm \
+      --apk /run/apple-music.package \
       --extract-libraries "/work/build/$arch/apple-libs"
 
 RUN set -eu; \
@@ -92,17 +92,17 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
 # Rootfs staging deliberately happens only after successful compilation and
 # uses the verified vendored Android files plus the private extracted Apple
 # libraries. Never copy accounts, preexisting rootfs, or session state.
-RUN --mount=type=bind,from=apple_apk,source=AppleMusic.apkm,target=/run/apple-music.apkm,readonly \
+RUN --mount=type=bind,from=apple_apk,source=AppleMusic.package,target=/run/apple-music.package,readonly \
     set -eu; \
     case "$TARGETARCH" in \
       amd64) arch=x86_64; target=x86_64-unknown-linux-gnu ;; \
       arm64) arch=arm64-v8a; target=aarch64-unknown-linux-gnu ;; \
       *) exit 1 ;; \
     esac; \
-    echo "$APPLE_APK_SHA256  /run/apple-music.apkm" | sha256sum -c -; \
+    echo "$APPLE_APK_SHA256  /run/apple-music.package" | sha256sum -c -; \
     mkdir -p /opt/wrapper; \
     python3 tools/prepare_rootfs.py --arch "$arch" \
-      --apk /run/apple-music.apkm \
+      --apk /run/apple-music.package \
       --output /opt/wrapper/rootfs; \
     python3 tools/verify_artifacts.py --arch "$arch" \
       "build/$arch/android/apple-music-worker" \
