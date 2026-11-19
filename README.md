@@ -76,7 +76,7 @@ For ARM64, the relevant entries are:
 WRAPPER_IMAGE=wrapper-v2:1.0.0-local-arm64
 ```
 
-For optional automatic login on startup, **uncomment and set both** `WRAPPER_USERNAME` and `WRAPPER_PASSWORD` in your private `.env` file. Leave both variables **absent**, not empty, when using manual authentication. A cached session is attempted before a fresh login.
+For optional automatic login on startup, **uncomment and set both** `WRAPPER_USERNAME` and `WRAPPER_PASSWORD` in your private `.env` file. Leave both variables **absent**, not empty, when using Gamdl or manual authentication. A cached session is attempted before a fresh login.
 
 ```bash
 docker compose up -d
@@ -85,7 +85,9 @@ curl -fsS http://127.0.0.1:8080/info
 curl -fsS http://127.0.0.1:8080/session
 ```
 
-The Compose configuration binds the HTTP service to **127.0.0.1** by default and preserves account data in a separate volume. **Do not rebuild the image with account data or publish it to a registry.** `GET /health` confirms the HTTP server is responding; use `GET /session` to check actual worker and authentication state. For manual login, send a JSON `POST` to `/session/login` containing `username` and `password`, and complete any required 2FA challenge using the endpoints below. Avoid putting real credentials directly in shell history.
+**Ready for Gamdl:** Once the container is running, point [Gamdl](https://github.com/glomatico/gamdl) to your Wrapper v2 endpoint. Gamdl prompts for your Apple Music credentials and handles two-factor authentication (2FA) when needed. You do **not** need to log in through the HTTP API or configure `WRAPPER_USERNAME` / `WRAPPER_PASSWORD` just to use Gamdl.
+
+The Compose configuration binds the HTTP service to **127.0.0.1** by default and preserves account data in a separate volume. **Do not rebuild the image with account data or publish it to a registry.** `GET /health` confirms the HTTP server is responding; use `GET /session` to check actual worker and authentication state. If using the HTTP API directly instead of Gamdl, send a JSON `POST` to `/session/login` containing `username` and `password`, and complete any required 2FA challenge using the endpoints below. Avoid putting real credentials directly in shell history.
 
 ## HTTP API
 
