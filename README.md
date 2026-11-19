@@ -150,6 +150,19 @@ For development, `tools/build.sh` can still build the native worker and launcher
 - Serves one native operation at a time; concurrent requests may be rejected with `worker_busy`.
 - Requires the operator to supply the pinned Apple Music APK, maintain an authorized Apple Music account, and comply with applicable service and licensing restrictions.
 
+## Acknowledgements
+
+Wrapper v2 owes a great deal to the projects and people who helped build the Apple Music wrapper ecosystem:
+
+- **[zhaarey/wrapper](https://github.com/zhaarey/wrapper)** — the original Wrapper project, which laid the groundwork for running Apple Music's Android components without a full Android emulator.
+- **WorldOfDecrypt / [WorldObservationLog](https://github.com/WorldObservationLog)** — for their work on [Wrapper and Wrapper Lite](https://github.com/WorldObservationLog/wrapper/tree/lite), and on the [Temari](https://github.com/WorldObservationLog/Temari) decryption library and related tooling.
+
+Thank you to their contributors and the wider community for sharing their research and making continued development possible. Wrapper v2 1.0.0 is a rewrite with its own implementation; these acknowledgements recognize the preceding work and ideas, not an endorsement of this project by the upstream authors.
+
+## AI usage
+
+**This project was developed with substantial assistance from AI coding tools.** AI was used throughout development for implementation, architecture discussions, debugging, testing, and documentation. AI-generated suggestions and code can be incorrect or introduce security vulnerabilities, even when automated tests pass. The project maintainer remains responsible for reviewing, testing, and maintaining the published code. Issues and independent reviews are welcome.
+
 ## License
 
 Wrapper v2's original source code is released under [The Unlicense](LICENSE). The bundled Android system files retain their own licenses and required notices, documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and included in locally built images. Apple's proprietary libraries are **not shipped in the source repository** but **are embedded in private Docker builds**. Do not redistribute those images without the necessary rights. This project is not affiliated with or endorsed by Apple.
