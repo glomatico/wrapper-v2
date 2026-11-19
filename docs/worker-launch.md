@@ -30,7 +30,7 @@ A supervisor count of successful replies would miss charged failures. A native n
 
 ## Container deployment
 
-Package the rebuilt Linux `wrapperd` and `worker-launch` for the target architecture. Reuse the existing staged Android rootfs, private session volume and device configuration. The Compose service enables `init: true` so the container init can reap a launcher or namespace init orphaned by an abrupt kill. Use `--init` for an equivalent `docker run`.
+Build the private image with `tools/build-docker.sh --arch x86_64` (or `arm64-v8a`) and your pinned Apple Music APK. The Dockerfile compiles `wrapperd`, `worker-launch`, and the native Android worker, then embeds the verified Android rootfs and extracted Apple libraries in the resulting image. **Do not publish this image**, as it contains proprietary Apple code. Keep the private session volume and device configuration across image rebuilds; do not mount a host rootfs over the embedded one. The Compose service enables `init: true` so the container init can reap a launcher or namespace init orphaned by an abrupt kill. Use `--init` for an equivalent `docker run`.
 
 The launcher uses the existing `CAP_SYS_ADMIN` for namespace and mount operations and `CAP_SYS_CHROOT` for chroot. Preserve its image file capabilities and the existing Compose security options. The HTTP service runs as the configured non-root UID. A custom seccomp or LSM policy must permit the combined `unshare(CLONE_NEWNS | CLONE_NEWPID)`, a procfs mount, and the existing device bind and chroot operations. Namespace setup fails closed on error.
 

@@ -1,11 +1,10 @@
 services:
   wrapper:
-    image: ${WRAPPER_IMAGE:?Set the locally packaged amd64 or arm64 image}
+    # Build privately first with tools/build-docker.sh.
+    # The image contains the pinned Apple Music native libraries.
+    image: ${WRAPPER_IMAGE:?Set the locally built amd64 or arm64 image}
     # Also passes optional WRAPPER_USERNAME/WRAPPER_PASSWORD for auto-login.
     env_file: .env
-    build:
-      context: .
-      dockerfile: Dockerfile
     restart: unless-stopped
     # Reap an orphaned launcher or namespace init after an abrupt supervisor kill.
     init: true
@@ -27,9 +26,8 @@ services:
       WRAPPER_DNS: "${WRAPPER_DNS:-1.1.1.1,8.8.8.8}"
       RUST_LOG: "${RUST_LOG:-info}"
     volumes:
-      # Prepared from a user-supplied *pinned* Apple Music APK. Not in image.
-      - ${WRAPPER_ROOTFS_DIR:?Set the prepared rootfs path for this host architecture}:/srv/wrapper/rootfs:ro
-      # Private writable state must be owned by WRAPPER_UID on the host.
+      # The complete Android rootfs is built into this private image.
+      # Mount only account/session state as writable; never bake it into Docker.
       - ${WRAPPER_DATA_DIR:-./data}:/srv/wrapper/rootfs/data/data/com.apple.android.music/files:rw
     tmpfs:
       - /srv/wrapper/rootfs/tmp:rw,nosuid,nodev,mode=1777

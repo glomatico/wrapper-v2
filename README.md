@@ -13,7 +13,8 @@ The server **does not decrypt or download media**. Decryption, when supported, t
 - **Session management** with cached authentication, manual login, and two-factor authentication.
 - **Automatic session recovery** and transparent, bounded retries during planned worker recycling.
 - **Isolated native workers** with separate mount and PID namespaces, process supervision, and cleanup.
-- **Small runtime images**, with proprietary files and account data kept outside the image.
+- **Self-contained, privately built Docker images** with the verified Android runtime and Apple Music libraries.
+- **Persistent account state** stored separately from the image.
 - **Structured JSON logs** with sanitized request metadata.
 
 ## Requirements
@@ -24,76 +25,42 @@ The server **does not decrypt or download media**. Decryption, when supported, t
 | Deployment | Docker with Compose (recommended) |
 | Apple Music | **Version 3.6.0-beta, build 1109**, for the selected architecture |
 | Android runtime | Bundled, architecture-specific Android system files (x86-64: API 21; ARM64: API 22) |
-| Native build | Android NDK **r23b**, CMake, Ninja, C++17 compiler, Python 3, Git, and pinned CMake dependencies |
-| Server build | Rust toolchain; cross-builds also require the target's Linux cross-compiler and Rust target |
+| Building | Docker with Buildx/BuildKit and standard Linux shell tools |
+| Toolchains | Android NDK **r23b**, Rust, CMake, Ninja, and cross-compilers are installed **inside Docker** |
 
 The Apple Music build and bundled Android runtime are **strictly pinned**. Other APK versions and substitute libraries are not supported merely because they have the same architecture.
 
-**You must supply your own authorized copy of the pinned Apple Music APK.** The Android system libraries are bundled from [verified Google system images](vendor/android-system/README.md), with their [third-party notices](THIRD_PARTY_NOTICES.md). Apple libraries, account credentials, and sessions are **not** included in the repository or Docker images. The staging utility verifies hashes before installing any files into the local rootfs.
+**You must supply your own authorized copy of the pinned Apple Music APK.** The Android system libraries are bundled from [verified Google system images](vendor/android-system/README.md), with their [third-party notices](THIRD_PARTY_NOTICES.md). The APK never enters Git or the ordinary source build context: the build script supplies it through an isolated, read-only BuildKit named context. **The final, locally built image contains the extracted proprietary Apple libraries. Do not publish or redistribute that image.** Login credentials and saved sessions are never built into the image.
 
 ## Getting started
 
-The example below uses `x86_64`. For ARM64, set `ARCH=arm64-v8a` and use the matching Apple Music APK. **No separate Android system image is needed** for either architecture.
+The example below builds an x86-64 image. For ARM64, use the `--arch arm64-v8a` flag instead. **No local Android NDK, Rust toolchain, or Android system image is needed.** Docker compiles both architectures with an x86-64 NDK builder. Cross-architecture builds also require QEMU/binfmt emulation for the target image's runtime setup, or a remote multi-platform Buildx builder. On an x86-64 Linux host without ARM64 emulation, enable it with `docker run --privileged --rm tonistiigi/binfmt --install arm64` (this registers a host-level emulator). Docker Desktop may already provide this support.
 
-### 1. Extract the Apple Music libraries
+### 1. Obtain the supported Apple Music APK
 
 Clone this repository and choose the correct architecture:
 
 ```bash
 git clone https://github.com/glomatico/wrapper-v2.git
 cd wrapper-v2
-export ARCH=x86_64 # or arm64-v8a
 export APPLE_MUSIC_APK=/path/to/your/Apple-Music.apkm
 ```
 
-The Android system libraries are already included in `vendor/android-system/<architecture>/`. Provide either the supported APKM bundle (including `base.apk` and the architecture split) or the verified architecture-specific APK.
+Provide either the supported APKM bundle (containing `base.apk` and the architecture split) or the verified architecture-specific APK. The Android system files are already in `vendor/android-system/`; both the APK libraries and Android binaries are checked against pinned SHA-256 hashes.
+
+### 2. Build everything in Docker
 
 ```bash
-python3 tools/prepare_rootfs.py \
-  --arch "$ARCH" \
-  --apk "$APPLE_MUSIC_APK" \
-  --extract-libraries "build/$ARCH/apple-libs"
+./tools/build-docker.sh --arch x86_64
+# For ARM64 instead:
+# ./tools/build-docker.sh --arch arm64-v8a
 ```
 
-The extraction directory must not already exist. Unsupported APKs and mismatched libraries fail hash verification. Only verified Apple libraries are extracted into the local ignored `build/` directory; they are not committed or published.
+The multi-stage Docker build installs the pinned NDK and a Rust toolchain, compiles the native worker, Linux launcher, and Rust supervisor, and assembles the complete Android rootfs **inside the image**. The APK is bind-mounted read-only from its isolated named build context (and its SHA-256 controls cache invalidation); the raw APK is **not copied into an image layer**. The Docker builder still receives the archive, so use only a trusted, private builder. The verified Apple libraries extracted from it are present in the resulting runtime image.
 
-### 2. Build the native worker and launcher
+The generated image is `wrapper-v2:1.0.0-local-amd64` for x86-64 or `wrapper-v2:1.0.0-local-arm64` for ARM64. Initial builds download the Android NDK and toolchains and therefore require substantial time, network access, and disk space; subsequent builds can reuse Docker layer caches.
 
-Install Android NDK **r23b (23.1.7779620)**, CMake, Ninja, a C++ compiler, Python 3 and Git. Set `ANDROID_NDK_HOME` to the NDK directory:
-
-```bash
-export ANDROID_NDK_HOME=/path/to/android-ndk-r23b
-./tools/build.sh --arch "$ARCH"
-```
-
-For an ARM64 build on an x86-64 Linux machine, install the `aarch64-linux-gnu-g++` and `aarch64-linux-gnu-gcc` cross-compilers. Native dependencies are pinned by CMake and may be fetched during the first build. A preconfigured local Docker builder is **not required** for this standard workflow.
-
-### 3. Stage the verified Android rootfs
-
-```bash
-python3 tools/prepare_rootfs.py \
-  --arch "$ARCH" \
-  --apk "$APPLE_MUSIC_APK"
-```
-
-The utility creates `build/$ARCH/rootfs` using the bundled, SHA-256-verified Android system files and refuses to overwrite an existing destination. Keep this directory **private**; it contains Apple libraries and will be mounted into the container, not bundled into the image. Advanced users may override the Android binaries with `--android-system /path/to/system`, but hashes must still match the selected profile.
-
-### 4. Build the Docker image
-
-```bash
-./tools/package.sh --arch "$ARCH"
-```
-
-For cross-compilation, first add the corresponding Rust target with `rustup target add`, and ensure its Linux linker is on `PATH` (or set `CROSS_CC`). For example, from an x86-64 Linux host targeting ARM64:
-
-```bash
-rustup target add aarch64-unknown-linux-gnu
-CROSS_CC=aarch64-linux-gnu-gcc ./tools/package.sh --arch arm64-v8a
-```
-
-The resulting image is `wrapper-v2:1.0.0-local-amd64` for x86-64 or `wrapper-v2:1.0.0-local-arm64` for ARM64. It contains **only** the Rust server and Linux launcher; the prepared Android rootfs is mounted separately.
-
-### 5. Configure and start
+### 3. Configure and start
 
 ```bash
 cp .env.example .env
@@ -101,25 +68,24 @@ ${EDITOR:-vi} .env
 mkdir -p data
 ```
 
-Set `WRAPPER_IMAGE`, `WRAPPER_ROOTFS_DIR`, and `WRAPPER_DEVICE_INFO` for your build. The device information must be a stable, **nine-part, slash-separated** identifier used by your own authorized Apple Music session; do not use the placeholder or share this value. Ensure that the configured UID/GID can access the staged session directory and writable `data/` directory.
+Set `WRAPPER_IMAGE` and `WRAPPER_DEVICE_INFO` for your build. The device information must be a stable, **nine-part, slash-separated** identifier used by your own authorized Apple Music session; do not use the placeholder or share this value. Ensure that the configured UID/GID can access the writable `data/` directory. The Android runtime is now embedded and **must not be bind-mounted from the host**.
 
 For ARM64, the relevant entries are:
 
 ```dotenv
 WRAPPER_IMAGE=wrapper-v2:1.0.0-local-arm64
-WRAPPER_ROOTFS_DIR=./build/arm64-v8a/rootfs
 ```
 
 For optional automatic login on startup, **uncomment and set both** `WRAPPER_USERNAME` and `WRAPPER_PASSWORD` in your private `.env` file. Leave both variables **absent**, not empty, when using manual authentication. A cached session is attempted before a fresh login.
 
 ```bash
-docker compose up -d --no-build
+docker compose up -d
 docker compose logs -f wrapper
 curl -fsS http://127.0.0.1:8080/info
 curl -fsS http://127.0.0.1:8080/session
 ```
 
-The Compose configuration binds the HTTP service to **127.0.0.1** by default and preserves account data in a separate volume. `GET /health` confirms the HTTP server is responding; use `GET /session` to check actual worker and authentication state. For manual login, send a JSON `POST` to `/session/login` containing `username` and `password`, and complete any required 2FA challenge using the endpoints below. Avoid putting real credentials directly in shell history.
+The Compose configuration binds the HTTP service to **127.0.0.1** by default and preserves account data in a separate volume. **Do not rebuild the image with account data or publish it to a registry.** `GET /health` confirms the HTTP server is responding; use `GET /session` to check actual worker and authentication state. For manual login, send a JSON `POST` to `/session/login` containing `username` and `password`, and complete any required 2FA challenge using the endpoints below. Avoid putting real credentials directly in shell history.
 
 ## HTTP API
 
@@ -163,7 +129,7 @@ Errors use the form `{"error":{"code":"...","retryable":false,"restart_required"
 
 **Do not expose Wrapper v2 directly to the internet.** There is no built-in HTTP authentication or TLS, and `/session/credentials` returns sensitive account material. Use a loopback binding, a private network, or a separately authenticated TLS gateway. Restrict access to the host, Docker socket, `.env`, staged rootfs, and session volumes. Environment-based auto-login credentials are visible to users with access to Docker container configuration.
 
-The Compose configuration starts the HTTP process as a non-root UID. The native launcher temporarily needs `CAP_SYS_ADMIN` and `CAP_SYS_CHROOT` for namespaces, mounts, and `chroot`; those privileges are dropped before the Android worker runs. The service also uses a read-only container filesystem and an init process for child reaping. Container runtimes with stricter seccomp/LSM policies may need corresponding namespace/mount permissions.
+The Compose configuration starts the HTTP process as a non-root UID. The native launcher temporarily needs `CAP_SYS_ADMIN` and `CAP_SYS_CHROOT` for namespaces, mounts, and `chroot`; those privileges are dropped before the Android worker runs. The service also uses a read-only container filesystem and an init process for child reaping. Container runtimes with stricter seccomp/LSM policies may need corresponding namespace/mount permissions. **Any user with permission to pull/export the locally built image can extract its embedded Apple libraries.** Keep the image private and restrict Docker daemon access.
 
 Workers have a bounded operation budget and are replaced when necessary, with authenticated sessions restored before protected requests continue. Each worker receives a fresh PID namespace to avoid a known mutex/TID overflow in the pinned Android runtime. See [worker lifecycle](docs/worker-launch.md).
 
@@ -180,7 +146,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py' -v
 
 The automated HTTP tests use a **synthetic worker**; they do not require Apple account credentials or proprietary files. Additional Linux namespace tests require `unshare` support and elevated namespace permissions; follow [worker lifecycle](docs/worker-launch.md) for instructions. Validate the actual architecture-specific worker and cached session before production deployment.
 
-Maintainers who already have the pinned, locally provisioned `wrapper-v2:native-build` image can use `tools/build-local.sh --arch "$ARCH"` instead of `tools/build.sh`. This is an **optional local development helper**; the builder image and proprietary libraries are not distributed with Wrapper v2.
+For development, `tools/build.sh` can still build the native worker and launcher on a host with Android NDK r23b installed. Maintainers with the locally provisioned `wrapper-v2:native-build` image can use `tools/build-local.sh --arch arm64-v8a` instead. These are **optional native-only developer workflows**; the recommended Docker build does not require either. When using the host tools, first extract verified Apple libraries with `tools/prepare_rootfs.py --extract-libraries`.
 
 ## Limitations
 
@@ -191,4 +157,4 @@ Maintainers who already have the pinned, locally provisioned `wrapper-v2:native-
 
 ## License
 
-Wrapper v2's original source code is released under [The Unlicense](LICENSE). The bundled Android system files retain their own licenses and required notices, documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Apple's proprietary libraries are not redistributed. This project is not affiliated with or endorsed by Apple.
+Wrapper v2's original source code is released under [The Unlicense](LICENSE). The bundled Android system files retain their own licenses and required notices, documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and included in locally built images. Apple's proprietary libraries are **not shipped in the source repository** but **are embedded in private Docker builds**. Do not redistribute those images without the necessary rights. This project is not affiliated with or endorsed by Apple.

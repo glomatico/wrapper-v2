@@ -48,11 +48,14 @@ and original source licenses for the precise conditions.
 
 ## Excluded materials
 
-This project **does not redistribute** the Apple Music APK, Apple proprietary
-libraries, authentication credentials, or saved sessions. The original Apple
-software and any private client data must be supplied separately by an
-authorized operator and remain outside the published Docker image and Git
-repository.
+The **source repository** does not redistribute the Apple Music APK, Apple
+proprietary libraries, authentication credentials, or saved sessions. The
+private Docker build takes an operator-provided APK through a read-only,
+isolated BuildKit named context
+and intentionally includes its verified Apple native libraries in the
+**locally built image**. The raw APK, credentials, and sessions are not stored
+in that image. Do **not** publish or redistribute locally built images unless
+you have the necessary rights to distribute the embedded proprietary code.
 
 These notices do not provide a license to Apple's services, code or content.
 This repository is not affiliated with or endorsed by Apple or Google.

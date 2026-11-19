@@ -44,5 +44,6 @@ sha256sum linker64
 
 See [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) for attribution
 and redistribution information. These libraries are **not licensed under the
-Wrapper source code's Unlicense**. Apple's proprietary libraries and user
-account data are deliberately excluded.
+Wrapper source code's Unlicense**. Apple's proprietary libraries are excluded
+from Git but embedded in the *privately built* Docker image; authentication
+credentials and session data are excluded from both.

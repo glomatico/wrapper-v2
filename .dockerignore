@@ -1,9 +1,20 @@
-# The Docker build context is intentionally *only* these two binaries.
-# Never send user-provided APKs, credentials, sessions, or rootfs to the daemon.
+# Explicit source allowlist: build artifacts, credentials, user APKs,
+# session caches, private notes, and other local files never reach BuildKit.
 **
-!build/
-!build/package/
-!build/package/amd64/
-!build/package/arm64/
-!build/package/*/wrapperd
-!build/package/*/worker-launch
+!Cargo.toml
+!Cargo.lock
+!CMakeLists.txt
+!THIRD_PARTY_NOTICES.md
+!src/
+!src/**
+!native/
+!native/**
+!profiles/
+!profiles/**
+!tools/
+!tools/**
+!tests/
+!tests/common_tests.cpp
+!vendor/
+!vendor/android-system/
+!vendor/android-system/**
