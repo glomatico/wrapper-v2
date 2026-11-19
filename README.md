@@ -1,8 +1,8 @@
 # Wrapper v2
 
-**A lightweight, self-hosted Apple Music playback and Temari-compatible context server.**
+**A self-hosted Apple Music playback and Temari-compatible context server.**
 
-Wrapper v2 provides an HTTP API for authenticated Apple Music sessions, playback information, and the contexts used by compatible clients such as [Gamdl](https://github.com/glomatico/gamdl). It replaces the earlier Wrapper v2 implementation with a Rust HTTP supervisor and a native C++ worker.
+Wrapper v2 provides an HTTP API for authenticated Apple Music sessions, playback information, and decryption contexts used by compatible clients such as [Gamdl](https://github.com/glomatico/gamdl). The 1.0.0 rewrite uses a Rust HTTP supervisor and a native C++ worker.
 
 The server **does not decrypt or download media**. Decryption, when supported, takes place on the client side. The legacy `/decrypt` endpoint is **not** part of the 1.0.0 API.
 
@@ -24,18 +24,18 @@ The server **does not decrypt or download media**. Decryption, when supported, t
 | Deployment | Docker with Compose (recommended) |
 | Apple Music | **Version 3.6.0-beta, build 1109**, for the selected architecture |
 | Android runtime | Bundled, architecture-specific Android system files (x86-64: API 21; ARM64: API 22) |
-| Native build | Android NDK **r23b**, CMake, Ninja, C++17 compiler, Python 3, and pinned CMake dependencies |
-| Server build | Rust toolchain and, for cross-compilation, the corresponding Linux cross-compiler and Rust target |
+| Native build | Android NDK **r23b**, CMake, Ninja, C++17 compiler, Python 3, Git, and pinned CMake dependencies |
+| Server build | Rust toolchain; cross-builds also require the target's Linux cross-compiler and Rust target |
 
 The Apple Music build and bundled Android runtime are **strictly pinned**. Other APK versions and substitute libraries are not supported merely because they have the same architecture.
 
-**You must supply your own authorized copy of the pinned Apple Music APK.** The Android system libraries are bundled from verified official Google system images, with their third-party notices. Apple libraries, account credentials, and sessions are **not** included in the repository or Docker images. The staging utility verifies hashes before installing any files into the local rootfs. See [third-party notices](THIRD_PARTY_NOTICES.md).
+**You must supply your own authorized copy of the pinned Apple Music APK.** The Android system libraries are bundled from [verified Google system images](vendor/android-system/README.md), with their [third-party notices](THIRD_PARTY_NOTICES.md). Apple libraries, account credentials, and sessions are **not** included in the repository or Docker images. The staging utility verifies hashes before installing any files into the local rootfs.
 
 ## Getting started
 
-The example below uses `x86_64`. For ARM64, set `ARCH=arm64-v8a`, use the matching APK and Android system files, and select the ARM64 image and rootfs path in `.env`.
+The example below uses `x86_64`. For ARM64, set `ARCH=arm64-v8a` and use the matching Apple Music APK. **No separate Android system image is needed** for either architecture.
 
-### 1. Obtain and verify the pinned libraries
+### 1. Extract the Apple Music libraries
 
 Clone this repository and choose the correct architecture:
 
@@ -46,7 +46,7 @@ export ARCH=x86_64 # or arm64-v8a
 export APPLE_MUSIC_APK=/path/to/your/Apple-Music.apkm
 ```
 
-The Android system libraries are already included in `vendor/android-system/<architecture>/`. The APK may be the supported split-package archive or the verified architecture-specific APK.
+The Android system libraries are already included in `vendor/android-system/<architecture>/`. Provide either the supported APKM bundle (including `base.apk` and the architecture split) or the verified architecture-specific APK.
 
 ```bash
 python3 tools/prepare_rootfs.py \
@@ -55,18 +55,18 @@ python3 tools/prepare_rootfs.py \
   --extract-libraries "build/$ARCH/apple-libs"
 ```
 
-The extraction directory must not already exist. An unsupported APK or mismatched library fails verification.
+The extraction directory must not already exist. Unsupported APKs and mismatched libraries fail hash verification. Only verified Apple libraries are extracted into the local ignored `build/` directory; they are not committed or published.
 
 ### 2. Build the native worker and launcher
 
-Install Android NDK **r23b (23.1.7779620)**, CMake, Ninja, and a C++ compiler. Set `ANDROID_NDK_HOME` to the NDK directory:
+Install Android NDK **r23b (23.1.7779620)**, CMake, Ninja, a C++ compiler, Python 3 and Git. Set `ANDROID_NDK_HOME` to the NDK directory:
 
 ```bash
 export ANDROID_NDK_HOME=/path/to/android-ndk-r23b
 ./tools/build.sh --arch "$ARCH"
 ```
 
-For an ARM64 build on an x86-64 Linux machine, install an `aarch64-linux-gnu-g++` cross-compiler as well. The project also provides `tools/build-local.sh` for use with an **already provisioned** local `wrapper-v2:native-build` builder image; that image is not included or downloaded automatically.
+For an ARM64 build on an x86-64 Linux machine, install the `aarch64-linux-gnu-g++` and `aarch64-linux-gnu-gcc` cross-compilers. Native dependencies are pinned by CMake and may be fetched during the first build. A preconfigured local Docker builder is **not required** for this standard workflow.
 
 ### 3. Stage the verified Android rootfs
 
@@ -76,17 +76,22 @@ python3 tools/prepare_rootfs.py \
   --apk "$APPLE_MUSIC_APK"
 ```
 
-The utility creates `build/$ARCH/rootfs` using the bundled, SHA-256-verified Android system files and refuses to overwrite an existing destination. Keep this directory **private**; it contains Apple libraries and will be mounted into the container, not bundled into the image. Advanced users can override the Android binaries with `--android-system /path/to/system`, but their hashes must still match the selected profile.
+The utility creates `build/$ARCH/rootfs` using the bundled, SHA-256-verified Android system files and refuses to overwrite an existing destination. Keep this directory **private**; it contains Apple libraries and will be mounted into the container, not bundled into the image. Advanced users may override the Android binaries with `--android-system /path/to/system`, but hashes must still match the selected profile.
 
 ### 4. Build the Docker image
 
 ```bash
-# For ARM64 cross-compilation, also install the Rust target and set an
-# appropriate AArch64 Linux linker before running this command.
 ./tools/package.sh --arch "$ARCH"
 ```
 
-The generated image is named `wrapper-v2:1.0.0-local-amd64` for x86-64 or `wrapper-v2:1.0.0-local-arm64` for ARM64. It contains the Rust server and Linux launcher only.
+For cross-compilation, first add the corresponding Rust target with `rustup target add`, and ensure its Linux linker is on `PATH` (or set `CROSS_CC`). For example, from an x86-64 Linux host targeting ARM64:
+
+```bash
+rustup target add aarch64-unknown-linux-gnu
+CROSS_CC=aarch64-linux-gnu-gcc ./tools/package.sh --arch arm64-v8a
+```
+
+The resulting image is `wrapper-v2:1.0.0-local-amd64` for x86-64 or `wrapper-v2:1.0.0-local-arm64` for ARM64. It contains **only** the Rust server and Linux launcher; the prepared Android rootfs is mounted separately.
 
 ### 5. Configure and start
 
@@ -105,7 +110,7 @@ WRAPPER_IMAGE=wrapper-v2:1.0.0-local-arm64
 WRAPPER_ROOTFS_DIR=./build/arm64-v8a/rootfs
 ```
 
-For optional automatic login on startup, **uncomment and set both** `WRAPPER_USERNAME` and `WRAPPER_PASSWORD` in your private `.env` file. Leave both variables **absent**, not empty, when using manual authentication. A configured cached session is attempted before a fresh login.
+For optional automatic login on startup, **uncomment and set both** `WRAPPER_USERNAME` and `WRAPPER_PASSWORD` in your private `.env` file. Leave both variables **absent**, not empty, when using manual authentication. A cached session is attempted before a fresh login.
 
 ```bash
 docker compose up -d --no-build
@@ -114,7 +119,7 @@ curl -fsS http://127.0.0.1:8080/info
 curl -fsS http://127.0.0.1:8080/session
 ```
 
-The Compose configuration binds the HTTP service to **127.0.0.1** by default and preserves account data in a separate volume. `GET /health` confirms the HTTP server is responding; use `GET /session` to check actual worker and authentication state.
+The Compose configuration binds the HTTP service to **127.0.0.1** by default and preserves account data in a separate volume. `GET /health` confirms the HTTP server is responding; use `GET /session` to check actual worker and authentication state. For manual login, send a JSON `POST` to `/session/login` containing `username` and `password`, and complete any required 2FA challenge using the endpoints below. Avoid putting real credentials directly in shell history.
 
 ## HTTP API
 
@@ -175,12 +180,14 @@ python3 -B -m unittest discover -s tests -p 'test_*.py' -v
 
 The automated HTTP tests use a **synthetic worker**; they do not require Apple account credentials or proprietary files. Additional Linux namespace tests require `unshare` support and elevated namespace permissions; follow [worker lifecycle](docs/worker-launch.md) for instructions. Validate the actual architecture-specific worker and cached session before production deployment.
 
+Maintainers who already have the pinned, locally provisioned `wrapper-v2:native-build` image can use `tools/build-local.sh --arch "$ARCH"` instead of `tools/build.sh`. This is an **optional local development helper**; the builder image and proprietary libraries are not distributed with Wrapper v2.
+
 ## Limitations
 
 - Supports only the pinned Apple Music APK build and architecture-specific runtime profiles currently in `profiles/`.
 - Does not implement the previous Wrapper v2 `/decrypt` API or decrypt files server-side.
 - Serves one native operation at a time; concurrent requests may be rejected with `worker_busy`.
-- Requires the operator to provide verified Android files, maintain an authorized Apple Music account, and manage any applicable service or licensing restrictions.
+- Requires the operator to supply the pinned Apple Music APK, maintain an authorized Apple Music account, and comply with applicable service and licensing restrictions.
 
 ## License
 
