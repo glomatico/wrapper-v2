@@ -1,5 +1,6 @@
 mod auto_auth;
 mod config;
+mod device_info;
 mod error;
 mod http;
 mod logging;

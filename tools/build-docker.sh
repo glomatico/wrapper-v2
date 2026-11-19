@@ -38,6 +38,6 @@ ln -- "$apk" "$private_context/AppleMusic.apkm" 2>/dev/null \
 docker buildx build --load --platform "$platform" \
   --build-context "apple_apk=$private_context" \
   --build-arg "APPLE_APK_SHA256=$apk_sha256" \
-  --tag "$image" --file Dockerfile .
+  --tag "$image" --tag wrapper-v2:local --file Dockerfile .
 
-echo "Built $image. Configure WRAPPER_IMAGE=$image in .env and run docker compose up -d."
+echo "Built $image (also tagged wrapper-v2:local). Run docker compose up -d."

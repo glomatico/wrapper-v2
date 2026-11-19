@@ -22,7 +22,7 @@ The server **does not decrypt or download media**. Decryption, when supported, t
 | Component | Requirement |
 | --- | --- |
 | Host | Linux, `x86_64` or `aarch64` |
-| Deployment | Docker with Compose (recommended) |
+| Deployment | Docker with Compose **2.24+** (required for optional `.env`) |
 | Apple Music | **Version 3.6.0-beta, build 1109**, for the selected architecture |
 | Android runtime | Bundled, architecture-specific Android system files (x86-64: API 21; ARM64: API 22) |
 | Building | Docker with Buildx/BuildKit and standard Linux shell tools |
@@ -58,28 +58,21 @@ Provide either the supported APKM bundle (containing `base.apk` and the architec
 
 The multi-stage Docker build installs the pinned NDK and a Rust toolchain, compiles the native worker, Linux launcher, and Rust supervisor, and assembles the complete Android rootfs **inside the image**. The APK is bind-mounted read-only from its isolated named build context (and its SHA-256 controls cache invalidation); the raw APK is **not copied into an image layer**. The Docker builder still receives the archive, so use only a trusted, private builder. The verified Apple libraries extracted from it are present in the resulting runtime image.
 
-The generated image is `wrapper-v2:1.0.0-local-amd64` for x86-64 or `wrapper-v2:1.0.0-local-arm64` for ARM64. Initial builds download the Android NDK and toolchains and therefore require substantial time, network access, and disk space; subsequent builds can reuse Docker layer caches.
+The generated image is `wrapper-v2:1.0.0-local-amd64` for x86-64 or `wrapper-v2:1.0.0-local-arm64` for ARM64. It is also tagged `wrapper-v2:local`, which Docker Compose uses automatically. Initial builds download the Android NDK and toolchains and therefore require substantial time, network access, and disk space; subsequent builds can reuse Docker layer caches.
 
-### 3. Configure and start
-
-```bash
-cp .env.example .env
-${EDITOR:-vi} .env
-mkdir -p data
-```
-
-Set `WRAPPER_IMAGE` and `WRAPPER_DEVICE_INFO` for your build. The device information must be a stable, **nine-part, slash-separated** identifier used by your own authorized Apple Music session; do not use the placeholder or share this value. Ensure that the configured UID/GID can access the writable `data/` directory. The Android runtime is now embedded and **must not be bind-mounted from the host**.
-
-For ARM64, the relevant entries are:
-
-```dotenv
-WRAPPER_IMAGE=wrapper-v2:1.0.0-local-arm64
-```
-
-For optional automatic login on startup, **uncomment and set both** `WRAPPER_USERNAME` and `WRAPPER_PASSWORD` in your private `.env` file. Leave both variables **absent**, not empty, when using Gamdl or manual authentication. A cached session is attempted before a fresh login.
+### 3. Start Wrapper
 
 ```bash
 docker compose up -d
+```
+
+**No `.env` file or manual login is needed.** On first startup, Wrapper generates a unique, nine-part device identity and saves it in the persistent Docker volume alongside the session cache. The identity is reused on future restarts and image upgrades. **Preserve this volume**: deleting it (including via `docker compose down -v`) loses both the identity and cached login. The Android runtime is embedded in the image and must not be bind-mounted from the host.
+
+To configure an alternative image, port, DNS, device identity, or optional automatic login, copy `.env.example` to `.env` and uncomment only the settings you need. For automatic login, set **both** `WRAPPER_USERNAME` and `WRAPPER_PASSWORD`; otherwise leave them absent. Manual overrides must use a stable, slash-separated nine-field `WRAPPER_DEVICE_INFO`.
+
+**Existing installations:** Keep your current `.env` values for `WRAPPER_DEVICE_INFO` and `WRAPPER_DATA_DIR` and reuse the same session directory. A legacy cache without a saved generated identity will **not** be assigned a different identity automatically; the server rejects that setup until the original identity is supplied. Do not remove your existing `.env` or switch from a `./data` bind mount to the new named volume without migrating the session state.
+
+```bash
 docker compose logs -f wrapper
 curl -fsS http://127.0.0.1:8080/info
 curl -fsS http://127.0.0.1:8080/session
@@ -87,7 +80,7 @@ curl -fsS http://127.0.0.1:8080/session
 
 **Ready for Gamdl:** Once the container is running, point [Gamdl](https://github.com/glomatico/gamdl) to your Wrapper v2 endpoint. Gamdl prompts for your Apple Music credentials and handles two-factor authentication (2FA) when needed. You do **not** need to log in through the HTTP API or configure `WRAPPER_USERNAME` / `WRAPPER_PASSWORD` just to use Gamdl.
 
-The Compose configuration binds the HTTP service to **127.0.0.1** by default and preserves account data in a separate volume. **Do not rebuild the image with account data or publish it to a registry.** `GET /health` confirms the HTTP server is responding; use `GET /session` to check actual worker and authentication state. If using the HTTP API directly instead of Gamdl, send a JSON `POST` to `/session/login` containing `username` and `password`, and complete any required 2FA challenge using the endpoints below. Avoid putting real credentials directly in shell history.
+The Compose configuration binds the HTTP service to **127.0.0.1:8080** by default and preserves account data in a named volume. **Do not rebuild the image with account data or publish it to a registry.** `GET /health` confirms the HTTP server is responding; use `GET /session` to check actual worker and authentication state. If using the HTTP API directly instead of Gamdl, send a JSON `POST` to `/session/login` containing `username` and `password`, and complete any required 2FA challenge using the endpoints below. Avoid putting real credentials directly in shell history.
 
 ## HTTP API
 

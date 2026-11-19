@@ -1,5 +1,6 @@
 use std::{env, net::IpAddr, path::PathBuf};
 
+use crate::device_info;
 use crate::error::ApiError;
 use crate::profile::RuntimeProfile;
 
@@ -45,19 +46,20 @@ impl Config {
         profile.validate_rootfs(&rootfs)?;
         let launcher = std::fs::canonicalize(&launcher)
             .map_err(|_| ApiError::bad_config("WRAPPER_LAUNCHER"))?;
-        let device_info = env::var("WRAPPER_DEVICE_INFO")
-            .map_err(|_| ApiError::bad_config("WRAPPER_DEVICE_INFO"))?;
-        if device_info.split('/').count() != 9
-            || device_info.split('/').any(str::is_empty)
-            || device_info.len() > 512
-        {
-            return Err(ApiError::bad_config("WRAPPER_DEVICE_INFO"));
-        }
         let session_dir =
             env::var("WRAPPER_SESSION_DIR").unwrap_or_else(|_| DEFAULT_SESSION_DIR.into());
-        if !session_dir.starts_with('/') || session_dir.contains("/../") || session_dir == "/" {
+        if !session_dir.starts_with('/')
+            || session_dir.contains("/../")
+            || session_dir.ends_with("/..")
+            || session_dir == "/"
+        {
             return Err(ApiError::bad_config("WRAPPER_SESSION_DIR"));
         }
+        let device_info = device_info::resolve(
+            &rootfs,
+            &session_dir,
+            env::var("WRAPPER_DEVICE_INFO").ok().as_deref(),
+        )?;
         let dns: Vec<String> = env::var("WRAPPER_DNS")
             .unwrap_or_else(|_| "1.1.1.1,8.8.8.8".into())
             .split(',')
