@@ -2,7 +2,7 @@ name: Rust API
 
 on:
   push:
-    branches: [tamari]
+    branches: [main]
   pull_request:
 
 permissions:
