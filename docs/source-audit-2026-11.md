@@ -296,3 +296,85 @@ publish the resulting image.
   level in the README.
 - Added the findings, limits, architecture map, and private validation matrix
   in this document.
+
+
+## Successful clean-install reproduction — 25 November 2026 local time
+
+A subsequent clean installation confirmed the identity correction on x86_64.
+The log timestamps below were emitted in UTC on 26 November 2026; the test took
+place on 25 November local time (UTC-06:00).
+
+### Environment
+
+- Windows host: Windows 10 IoT Enterprise LTSC 2021.
+- Linux runtime: openSUSE Tumbleweed under an updated WSL installation.
+- Wrapper deployment: Docker Compose in the Linux environment.
+- Wrapper version: 1.0.0.
+- Native worker: x86_64.
+- Apple Music: pinned 3.6.0-beta, build 1109.
+- Gamdl: freshly installed separately on Windows.
+- Test scope: x86_64 only.
+
+### Authentication evidence
+
+The sanitized log shows:
+
+- The Rust API started successfully.
+- The x86_64 worker initialized successfully.
+- A previous-session restore returned `session_expired` (HTTP 403), which
+  preceded a new interactive login and did not prevent it.
+- `POST /session/login` returned HTTP 202, the expected pending-2FA response.
+- The challenge completed with HTTP 200 and Wrapper emitted
+  `session.authenticated`.
+- `GET /session` and `GET /session/credentials` returned HTTP 200.
+
+### Session-recovery and playback evidence
+
+Later, after the native worker was stopped and replaced:
+
+- The replacement x86_64 worker started.
+- Wrapper emitted `session.recovered`.
+- `GET /session/credentials` returned HTTP 200.
+- Two playback requests returned HTTP 200.
+- Two `/key` requests returned HTTP 200.
+
+This validates the fresh-login/2FA path and the exercised x86_64 session-recovery,
+playback, and key/context HTTP paths in the reported environment. It does not
+validate every catalog item, every media codec, all playback edge cases, or
+the internal correctness of context bytes beyond the successful endpoint
+responses in this test.
+
+### ARM64 qualification
+
+The identity generation and validation reside in shared Rust code, not in
+architecture-specific native capture files. Thus, the device-info change is
+expected to apply identically on ARM64. However, this reproduction did not
+build or run an ARM64 image and did not test ARM64 authentication, playback,
+or context capture. ARM64 must remain marked unverified until those steps are
+performed on an ARM64-capable or emulated Buildx/runtime environment.
+
+### Sanitized log evidence (relevant events)
+
+```jsonl
+{"timestamp":"2026-11-26T01:52:54.580290Z","level":"INFO","event":"server.started","version":"1.0.0","protocol":1,"architecture":"x86_64","host":"0.0.0.0","port":80}
+{"timestamp":"2026-11-26T01:53:31.644440Z","level":"INFO","event":"http.request","request_id":2,"method":"GET","path":"/session","status":200,"duration_ms":1013}
+{"timestamp":"2026-11-26T01:58:32.479258Z","level":"WARN","event":"worker.error","operation":"session.restore","code":"session_expired","restart_required":false}
+{"timestamp":"2026-11-26T01:58:32.479323Z","level":"WARN","event":"http.request","request_id":6,"method":"POST","path":"/session/restore","status":403,"duration_ms":1,"code":"session_expired"}
+{"timestamp":"2026-11-26T01:58:33.853034Z","level":"INFO","event":"http.request","request_id":8,"method":"GET","path":"/session","status":200,"duration_ms":0}
+{"timestamp":"2026-11-26T01:58:46.069488Z","level":"INFO","event":"http.request","request_id":9,"method":"POST","path":"/session/login","status":202,"duration_ms":6311}
+{"timestamp":"2026-11-26T01:59:10.838309Z","level":"INFO","event":"session.authenticated"}
+{"timestamp":"2026-11-26T01:59:10.838357Z","level":"INFO","event":"http.request","request_id":10,"method":"POST","path":"/session/challenge","status":200,"duration_ms":4444}
+{"timestamp":"2026-11-26T01:59:10.846869Z","level":"INFO","event":"http.request","request_id":11,"method":"GET","path":"/session","status":200,"duration_ms":0}
+{"timestamp":"2026-11-26T01:59:10.853881Z","level":"INFO","event":"http.request","request_id":12,"method":"GET","path":"/session/credentials","status":200,"duration_ms":0}
+{"timestamp":"2026-11-26T02:14:39.596825Z","level":"INFO","event":"worker.started","architecture":"x86_64"}
+{"timestamp":"2026-11-26T02:14:43.461339Z","level":"INFO","event":"session.recovered"}
+{"timestamp":"2026-11-26T02:14:43.461481Z","level":"INFO","event":"http.request","request_id":17,"method":"GET","path":"/session","status":200,"duration_ms":4540}
+{"timestamp":"2026-11-26T02:14:43.471588Z","level":"INFO","event":"http.request","request_id":18,"method":"GET","path":"/session/credentials","status":200,"duration_ms":0}
+{"timestamp":"2026-11-26T02:14:45.062051Z","level":"INFO","event":"http.request","request_id":19,"method":"GET","path":"/playback","status":200,"duration_ms":356}
+{"timestamp":"2026-11-26T02:14:45.388081Z","level":"INFO","event":"http.request","request_id":20,"method":"GET","path":"/playback","status":200,"duration_ms":317}
+{"timestamp":"2026-11-26T02:14:47.230518Z","level":"INFO","event":"http.request","request_id":21,"method":"GET","path":"/key","status":200,"duration_ms":321}
+{"timestamp":"2026-11-26T02:14:47.609184Z","level":"INFO","event":"http.request","request_id":22,"method":"GET","path":"/key","status":200,"duration_ms":309}
+```
+
+No username, password, 2FA code, cookie, token value, signed URL, or account
+identifier appears in this event excerpt.

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Expand the README with a distribution-independent clean Linux installation
+  procedure, exact build-1109 APKM verification, Docker/Buildx prerequisites,
+  Windows Gamdl-to-WSL connectivity, session persistence, and troubleshooting.
+- Record the successful clean x86_64 reproduction on openSUSE Tumbleweed under
+  updated WSL on Windows 10 IoT Enterprise LTSC 2021. Windows Gamdl was installed
+  separately. ARM64 remains expected from the shared identity code but has not
+  been live-tested in this reproduction.
 - Fix the generated first-install device fingerprint to use the known-working
   Apple Music client tuple `Music/5.0.2/Android/10/Pixel 8/7663314` and a
   64-bit Android ID encoded as 16 lowercase hexadecimal characters. The
