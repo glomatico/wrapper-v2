@@ -39,18 +39,19 @@ must include a server section).
 
 ## 2. Clone the corrected branch
 
-Until the correction is merged upstream:
+After the correction is merged upstream, clone the canonical repository:
+
+```bash
+git clone https://github.com/glomatico/wrapper-v2.git
+cd wrapper-v2
+```
+
+**While the upstream pull request is still awaiting review**, the tested fix is
+available on this fork branch:
 
 ```bash
 git clone --branch fix/device-info-apple-auth-1109 --single-branch \
   https://github.com/TuPapaPendejo/wrapper-v2-Tests.git wrapper-v2
-cd wrapper-v2
-```
-
-After the upstream maintainer merges the PR, clone the canonical repository:
-
-```bash
-git clone https://github.com/glomatico/wrapper-v2.git
 cd wrapper-v2
 ```
 

@@ -137,7 +137,15 @@ The `docker version` output must contain both client and server sections. Buildx
 
 #### 4.3 Clone the corrected source
 
-Until the correction is merged upstream, clone the tested branch from this fork:
+After the correction is merged upstream, clone the canonical repository:
+
+```bash
+git clone https://github.com/glomatico/wrapper-v2.git
+cd wrapper-v2
+```
+
+**While the upstream pull request is still awaiting review**, the tested fix is
+available on this fork branch:
 
 ```bash
 git clone --branch fix/device-info-apple-auth-1109 --single-branch \
@@ -145,14 +153,10 @@ git clone --branch fix/device-info-apple-auth-1109 --single-branch \
 cd wrapper-v2
 ```
 
-After the maintainer merges the corresponding pull request, use the canonical upstream repository:
+Check out a branch that contains the correction; do not assume that upstream
+`main` has been updated before the maintainer merges the pull request.
 
-```bash
-git clone https://github.com/glomatico/wrapper-v2.git
-cd wrapper-v2
-```
-
-Do not assume that upstream `main` contains the fix while its pull request is still under review. Confirm the branch and revision:
+Confirm the branch and revision:
 
 ```bash
 git status --short --branch
