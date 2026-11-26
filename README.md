@@ -89,6 +89,8 @@ The Compose configuration binds the HTTP service to **127.0.0.1:8080** by defaul
 
 This procedure is distribution-independent. Install the host prerequisites using the package manager and Docker setup supported by your Linux distribution.
 
+A standalone copy of this runbook is also available at [docs/clean-install-linux.md](docs/clean-install-linux.md).
+
 #### 4.1 Validated environment and support boundary
 
 The successful end-to-end reproduction used:
