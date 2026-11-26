@@ -280,9 +280,9 @@ passes it to BuildKit. The Dockerfile recomputes that same value inside the
 builder. This verifies that the supplied build input remains unchanged across
 the BuildKit hand-off and participates in cache invalidation. It is **not** a
 publisher-authenticity check and is not a comparison against a trusted,
-hard-coded whole-archive checksum. The unused `bundle_sha256` profile field
-was removed so the metadata no longer implies an archive-level validation
-that the staging code does not perform.
+hard-coded whole-archive checksum. Obsolete profile metadata that implied
+archive-level validation was removed because the staging code does not
+perform that check.
 
 Do not commit the input package, extracted proprietary libraries, account
 credentials, tokens, or session data. The resulting local image contains
