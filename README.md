@@ -26,7 +26,7 @@ The server **does not decrypt or download media**. Decryption, when supported, t
 | Host | Linux, `x86_64` or `aarch64` |
 | Deployment | Docker with Compose **2.24+** (required for optional `.env`) |
 | Apple Music | **Version 3.6.0-beta, build 1109**, for the selected architecture |
-| Android runtime | Bundled, architecture-specific Android system files (x86-64: API 21; ARM64: API 22) |
+| Android runtime | Bundled, architecture-specific Android system files (x86-64: API 21; ARM64: API 21) |
 | Building | Docker with Buildx/BuildKit and standard Linux shell tools |
 | Toolchains | Android NDK **r23b**, Rust, CMake, Ninja, and cross-compilers are installed **inside Docker** |
 
@@ -69,11 +69,11 @@ The generated image is `wrapper-v2:1.0.0-local-amd64` for x86-64 or `wrapper-v2:
 docker compose up -d
 ```
 
-**No `.env` file or manual login is needed.** On first startup, Wrapper generates a unique, nine-part device identity and saves it in the persistent Docker volume alongside the session cache. The identity is reused on future restarts and image upgrades. **Preserve this volume**: deleting it (including via `docker compose down -v`) loses both the identity and cached login. The Android runtime is embedded in the image and must not be bind-mounted from the host.
+**No `.env` file or manual login is needed.** On first startup, Wrapper generates a unique, nine-part device identity and saves it in the persistent Docker volume alongside the session cache. New installations use the tested `Music/5.0.2/Android/10/Pixel 8/7663314/en-US/en-US` client fingerprint and a random 16-character lowercase hexadecimal (64-bit) Android ID. The identity is reused on future restarts and image upgrades. **Preserve this volume**: deleting it (including via `docker compose down -v`) loses both the identity and cached login. The Android runtime is embedded in the image and must not be bind-mounted from the host.
 
 To configure an alternative image, port, DNS, device identity, or optional automatic login, copy `.env.example` to `.env` and uncomment only the settings you need. For automatic login, set **both** `WRAPPER_USERNAME` and `WRAPPER_PASSWORD`; otherwise leave them absent. Manual overrides must use a stable, slash-separated nine-field `WRAPPER_DEVICE_INFO`.
 
-**Existing installations:** Keep your current `.env` values for `WRAPPER_DEVICE_INFO` and `WRAPPER_DATA_DIR` and reuse the same session directory. A legacy cache without a saved generated identity will **not** be assigned a different identity automatically; the server rejects that setup until the original identity is supplied. Do not remove your existing `.env` or switch from a `./data` bind mount to the new named volume without migrating the session state.
+**Existing installations:** Keep your current `.env` values for `WRAPPER_DEVICE_INFO` and `WRAPPER_DATA_DIR` and reuse the same session directory. Existing `.wrapper-device-info` identities are deliberately not rewritten or migrated: this preserves the device hash recorded in `.worker-device` and avoids invalidating cached sessions. A legacy cache without a saved generated identity will **not** be assigned a different identity automatically; the server rejects that setup until the original identity is supplied. Do not remove your existing `.env` or switch from a `./data` bind mount to the new named volume without migrating the session state.
 
 ```bash
 docker compose logs -f wrapper

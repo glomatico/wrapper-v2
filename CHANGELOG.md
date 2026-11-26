@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Fix the generated first-install device fingerprint to use the known-working
+  Apple Music client tuple `Music/5.0.2/Android/10/Pixel 8/7663314` and a
+  64-bit Android ID encoded as 16 lowercase hexadecimal characters. The
+  identity remains generated once and persisted; existing identity files and
+  legacy session hashes are not rewritten.
+- Add regression coverage for the generated fingerprint shape and for
+  preservation of an existing 1.0.0 identity.
+- Correct the documented Android runtime API level for ARM64 to API 21,
+  matching the pinned profile and CMake build configuration.
+- Add a source-level reverse-engineering and security audit with explicit
+  runtime-validation limitations.
+
 ## 1.0.0 — 2026-11-19
 
 Wrapper v2 1.0.0 is a ground-up rewrite of the original Wrapper v2, built for

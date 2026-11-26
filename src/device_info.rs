@@ -13,7 +13,7 @@ use crate::error::ApiError;
 
 const FILE_NAME: &str = ".wrapper-device-info";
 const LEGACY_FILE_NAME: &str = ".worker-device";
-const DEVICE_PREFIX: &str = "Music/4.9/Android/10/Samsung S9/7663313/en-US/en-US/";
+const DEVICE_PREFIX: &str = "Music/5.0.2/Android/10/Pixel 8/7663314/en-US/en-US/";
 
 fn invalid() -> ApiError {
     ApiError::bad_config("WRAPPER_DEVICE_INFO")
@@ -31,11 +31,11 @@ fn validate(value: &str) -> Result<(), ApiError> {
 }
 
 fn random_suffix() -> Result<String, ApiError> {
-    let mut random = [0u8; 16];
+    let mut random = [0u8; 8];
     File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(&mut random))
         .map_err(|_| invalid())?;
-    let mut suffix = String::with_capacity(32);
+    let mut suffix = String::with_capacity(16);
     for byte in random {
         write!(suffix, "{byte:02x}").map_err(|_| invalid())?;
     }
