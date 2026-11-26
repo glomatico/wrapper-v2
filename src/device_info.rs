@@ -13,6 +13,9 @@ use crate::error::ApiError;
 
 const FILE_NAME: &str = ".wrapper-device-info";
 const LEGACY_FILE_NAME: &str = ".worker-device";
+// Match the known-working Apple Music client fingerprint used by the
+// upstream Wrapper implementation. Android IDs in this field are 64-bit
+// values rendered as 16 lowercase hexadecimal characters.
 const DEVICE_PREFIX: &str = "Music/5.0.2/Android/10/Pixel 8/7663314/en-US/en-US/";
 
 fn invalid() -> ApiError {
@@ -30,16 +33,21 @@ fn validate(value: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-fn random_suffix() -> Result<String, ApiError> {
-    let mut random = [0u8; 8];
+fn random_hex<const N: usize>() -> Result<String, ApiError> {
+    let mut random = [0u8; N];
     File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(&mut random))
         .map_err(|_| invalid())?;
-    let mut suffix = String::with_capacity(16);
+    let mut suffix = String::with_capacity(N * 2);
     for byte in random {
         write!(suffix, "{byte:02x}").map_err(|_| invalid())?;
     }
     Ok(suffix)
+}
+
+fn random_android_id() -> Result<String, ApiError> {
+    // The native Android client fingerprint uses an eight-byte / 64-bit ID.
+    random_hex::<8>()
 }
 
 fn read_identity(path: &Path) -> Result<String, ApiError> {
@@ -84,8 +92,13 @@ pub fn resolve(
         return Err(invalid());
     }
 
-    let identity = format!("{DEVICE_PREFIX}{}", random_suffix()?);
-    let temp_path = directory.join(format!(".wrapper-device-info-{}.tmp", random_suffix()?));
+    let identity = format!("{DEVICE_PREFIX}{}", random_android_id()?);
+    // Keep the temporary filename's entropy at 128 bits; it is independent
+    // of the 64-bit Android ID format required by the client fingerprint.
+    let temp_path = directory.join(format!(
+        ".wrapper-device-info-{}.tmp",
+        random_hex::<16>()?
+    ));
     let write_result = (|| -> Result<(), ApiError> {
         let mut temp = OpenOptions::new()
             .write(true)
@@ -116,7 +129,7 @@ mod tests {
 
     fn directory() -> std::path::PathBuf {
         let base =
-            std::env::temp_dir().join(format!("wrapper-identity-{}", random_suffix().unwrap()));
+            std::env::temp_dir().join(format!("wrapper-identity-{}", random_hex::<8>().unwrap()));
         fs::create_dir(&base).unwrap();
         base
     }
@@ -140,6 +153,38 @@ mod tests {
         );
         fs::remove_dir_all(base).unwrap();
         fs::remove_dir_all(another).unwrap();
+    }
+
+    #[test]
+    fn fresh_identity_uses_known_client_prefix_and_64_bit_android_id() {
+        let base = directory();
+        let generated = resolve(&base, "/", None).unwrap();
+        let android_id = generated
+            .strip_prefix(DEVICE_PREFIX)
+            .expect("generated identity must use the pinned client prefix");
+
+        assert_eq!(android_id.len(), 16);
+        assert!(android_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn existing_generated_identity_is_never_migrated_or_rotated() {
+        let base = directory();
+        // Existing 1.0.0 installations may have the previous 32-hex suffix.
+        let legacy = "Music/4.9/Android/10/Samsung S9/7663313/en-US/en-US/00112233445566778899aabbccddeeff";
+        fs::write(base.join(FILE_NAME), format!("{legacy}\n")).unwrap();
+
+        assert_eq!(resolve(&base, "/", None).unwrap(), legacy);
+        assert_eq!(
+            fs::read_to_string(base.join(FILE_NAME)).unwrap(),
+            format!("{legacy}\n")
+        );
+
+        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
