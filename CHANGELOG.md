@@ -12,6 +12,15 @@
 - Include the pinned AOSP source revision, reproducible build recipe, updated
   runtime checksum and standalone linker regression tests.
 
+- Fix the fresh-install device identity format for new installations, preserving
+  existing identities and cached sessions. Thanks to @TuPapaPendejo for
+  [PR #24](https://github.com/glomatico/wrapper-v2/pull/24) and @rocketguedes
+  for the diagnostic report in issue #23.
+- Add fresh identity and legacy persistence regression tests. The reported
+  live authentication validation covers x86-64; ARM64 remains unverified.
+- Consolidate installation documentation, clarify package verification, and
+  remove unused whole-archive checksum metadata.
+
 ## 1.0.0 — 2026-11-19
 
 Wrapper v2 1.0.0 is a ground-up rewrite of the original Wrapper v2, built for
