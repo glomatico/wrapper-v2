@@ -18,6 +18,12 @@ here. They were retained intact rather than selectively edited or paraphrased.
 The official system-image packages and their checksums are documented in
 [vendor/android-system/README.md](vendor/android-system/README.md).
 
+The ARM64 `bin/linker64` includes Wrapper's vDSO compatibility change to
+AOSP Bionic `linker/linker.cpp`, copyright (C) 2008, 2009 The Android Open
+Source Project. Its two-clause BSD notice is included in the ARM64 notice
+file under `/system/bin/linker64`. The source patch retains this attribution.
+See the [source revision and rebuild instructions](tools/bionic-arm64/README.md).
+
 ## License families
 
 The system images include multiple projects and licenses. Among them:

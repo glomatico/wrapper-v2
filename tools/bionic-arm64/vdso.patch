@@ -1,0 +1,23 @@
+Wrapper v2 change to AOSP Bionic 63d2f6db2e13aefb7802f13d597d47583897df6d
+linker/linker.cpp: Copyright (C) 2008, 2009 The Android Open Source Project
+SPDX-License-Identifier: BSD-2-Clause
+The full upstream notice is in vendor/android-system/arm64-v8a/NOTICE.txt.
+
+diff --git a/linker/linker.cpp b/linker/linker.cpp
+--- a/linker/linker.cpp
++++ b/linker/linker.cpp
+@@ -2286,4 +2286,14 @@ static void add_vdso(KernelArgumentBlock& args __unused) {
++#if defined(__aarch64__)
++  // A kernel vDSO with only DT_GNU_HASH cannot be searched by this linker.
++  // soinfo_alloc already published si in solist. Remove the incomplete entry
++  // before dlsym can visit it, retaining the mapping owned by the kernel.
++  if (!si->PrelinkImage() || !si->LinkImage(nullptr)) {
++    si->size = 0;
++    soinfo_free(si);
++  }
++#else
+   si->PrelinkImage();
+   si->LinkImage(nullptr);
++#endif
+ #endif
+ }

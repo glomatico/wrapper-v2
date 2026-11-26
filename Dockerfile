@@ -127,7 +127,7 @@ COPY --from=builder /work/vendor/android-system/arm64-v8a/NOTICE.txt /usr/share/
 RUN setcap cap_sys_admin,cap_sys_chroot+ep /usr/local/bin/worker-launch
 
 LABEL org.opencontainers.image.title="Wrapper-v2" \
-      org.opencontainers.image.version="1.0.0" \
+      org.opencontainers.image.version="1.0.1" \
       org.opencontainers.image.description="Private, self-built Temari-compatible Apple Music context provider"
 
 ENV WRAPPER_HOST=0.0.0.0 \

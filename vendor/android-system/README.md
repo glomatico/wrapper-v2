@@ -1,9 +1,10 @@
 # Bundled Android system runtime
 
-These files were **extracted directly from official Google Android SDK system
-images**, not copied from the previous Wrapper v2 repository or an unofficial
-binary mirror. Their archive integrity was checked against Google's repository
-metadata before extraction. Every included runtime file is pinned by SHA-256
+The Android libraries, time zone data and x86-64 linker come from official
+Google Android SDK system images. The ARM64 linker is built from the
+corresponding AOSP release with a vDSO compatibility patch. The SDK archive
+integrity was checked against Google's repository metadata before extraction.
+Every included runtime file is pinned by SHA-256
 in the corresponding `profiles/apple-music-1109-<architecture>.json` file.
 
 | Bundle | Official system image | ZIP SHA-1 (Google repository metadata) | ZIP SHA-256 |
@@ -13,13 +14,12 @@ in the corresponding `profiles/apple-music-1109-<architecture>.json` file.
 
 Google's package index: <https://dl.google.com/android/repository/sys-img/android/sys-img2-1.xml>
 
-The `bin/linker64`, architecture-specific `lib64/*.so` libraries, and
-`usr/share/zoneinfo/tzdata` were copied *unchanged* from each system image's
-root filesystem, without patches or rebuilt binaries. All binaries from the
-previous Wrapper bundle match their official counterparts byte-for-byte **except
-`tzdata`**. The latter was replaced by the version shipped in each respective
-official image and given its own SHA-256 pin. The original official archives'
-complete `NOTICE.txt` files are included alongside the binaries.
+The ARM64 SDK image reports Android 5.1.1, build `LMY48X`, incremental
+`8789835`. Its original `bin/linker64` SHA-256 is
+`869ca3c5781c1c32f35d9067ae627e075181babf4996f7c3a20ff32610efc094`.
+The ARM64 profile pins the rebuilt linker. The original complete `NOTICE.txt`
+files accompany both runtimes. See the [ARM64 build recipe and standalone
+regression](../../tools/bionic-arm64/README.md).
 
 ## Independent verification
 
@@ -29,9 +29,10 @@ complete `NOTICE.txt` files are included alongside the binaries.
    an ext4 filesystem; the paths under its root correspond to `bin/`,
    `lib64/` and `usr/` in this directory. You can use `debugfs` to extract
    individual files without mounting the image.
-3. Compare their SHA-256 hashes to the matching `android_system` map in
-   `profiles/`. The project's automated `test_vendor_android.py` repeats the
-   hash and file-inventory verification for the checked-in bundle.
+3. Compare extracted files against the `android_system` map in `profiles/`,
+   using the original hash above for the SDK ARM64 linker. Build the patched
+   linker with the linked recipe and compare its digest to the ARM64 profile.
+   `tests/test_vendor_android.py` verifies the checked-in files and inventory.
 
 Example for a locally downloaded x86-64 package:
 

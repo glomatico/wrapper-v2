@@ -1,4 +1,4 @@
-"""Verify the checked-in, official Google Android system runtime files."""
+"""Verify the checked-in Android runtime files against each architecture's pins."""
 import hashlib
 import json
 import unittest

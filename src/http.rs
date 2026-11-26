@@ -1,4 +1,4 @@
-//! Unversioned HTTP facade for Wrapper-v2 1.0.0; native IPC uses protocol v1.
+//! Unversioned HTTP facade for Wrapper-v2 1.x; native IPC uses protocol v1.
 use std::{
     collections::HashMap,
     convert::Infallible,

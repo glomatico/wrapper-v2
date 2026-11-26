@@ -34,7 +34,7 @@ own logging target**, never third-party HTTP/library diagnostic targets.
 Example (representative, not an actual account/session):
 
 ```jsonl
-{"timestamp":"2026-11-17T12:30:00Z","level":"INFO","event":"server.started","version":"1.0.0","protocol":1,"architecture":"arm64-v8a","host":"0.0.0.0","port":80}
+{"timestamp":"2026-11-17T12:30:00Z","level":"INFO","event":"server.started","version":"1.0.1","protocol":1,"architecture":"arm64-v8a","host":"0.0.0.0","port":80}
 {"timestamp":"2026-11-17T12:30:03Z","level":"INFO","event":"http.request","request_id":42,"method":"GET","path":"/playback","status":200,"duration_ms":26}
 {"timestamp":"2026-11-17T12:30:05Z","level":"WARN","event":"worker.error","operation":"context.get","code":"context_capture_failed","restart_required":false}
 ```

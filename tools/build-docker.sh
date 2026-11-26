@@ -39,7 +39,7 @@ if [[ "$apk_input" != /* ]]; then apk_input="$caller_pwd/$apk_input"; fi
 [[ -f "$apk_input" ]] || { echo "APK/APKM not found: $apk_input" >&2; exit 1; }
 apk=$(realpath -- "$apk_input")
 apk_sha256=$(sha256sum "$apk" | cut -d ' ' -f 1)
-image=${WRAPPER_IMAGE:-wrapper-v2:1.0.0-local-${platform#linux/}}
+image=${WRAPPER_IMAGE:-wrapper-v2:1.0.1-local-${platform#linux/}}
 
 echo "Building $image ($platform) with the verified APK supplied privately to BuildKit."
 echo "NOTE: The resulting image contains Apple's proprietary libraries; do not publish it."

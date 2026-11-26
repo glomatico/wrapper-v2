@@ -1,0 +1,11 @@
+b620b896c971fe44d51186dcaaae35dfd75e2f3f build
+63d2f6db2e13aefb7802f13d597d47583897df6d bionic
+38c06b14031ad140aced851908a7c19b0e834b33 system/core
+11f8ffed1d651dcafcb4f85ffc561a9eac13f844 external/compiler-rt
+fb795867f0b3aa28bbdf177e1026f3e3408e0338 external/jemalloc
+4b8f3fcd3196ba291f82321cd5d1bd688b52d2ba external/libcxx
+d0388a36b67665be55162388337055ee21a43206 external/stlport
+187eba8b5649d25cf3027596b21d412b339bea2f prebuilts/clang/linux-x86/host/3.5
+d4d54ede13f6f76c77137c35a87fa5f0436eded2 prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9
+d9735fc81434f2af2c44d86ca57740c673c8d9bc prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.8
+1b0544da652fda90a41a1f69889d6b137ce20fb9 prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.11-4.8

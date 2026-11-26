@@ -1,6 +1,6 @@
 [package]
 name = "wrapperd"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 publish = false
 description = "General-purpose Apple Music / Temari-compatible context server"

@@ -27,7 +27,7 @@
     "libxml2.so": "a7349a425f3cd59080d661b0507cee1c0057c7ce5db791c73078dac26bbc6dd5"
   },
   "android_system": {
-    "bin/linker64": "869ca3c5781c1c32f35d9067ae627e075181babf4996f7c3a20ff32610efc094",
+    "bin/linker64": "89f530cb4aee482c8e3dc34a43a94acfa18f0632a4a315583af92e21117b5006",
     "lib64/libEGL.so": "0cd67d47a531e1be95f1ebe1d55043e374d3f8ce498c752dae656a0bea8b8ae4",
     "lib64/libETC1.so": "9477838b36672691ad3071ac6dbac20dbca43d608663db9ac9b9ca830eecb5fd",
     "lib64/libGLES_trace.so": "7beec44ae8bef4e61e2c47d2f04e22dc48821b6102e0bfa8b8dcb61621af50b9",

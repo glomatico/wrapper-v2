@@ -61,7 +61,7 @@ Provide either an `.apkm` bundle (containing `base.apk` and the correct architec
 
 The file path is passed directly to the build script; no environment variable is required. The multi-stage Docker build installs the pinned NDK and a Rust toolchain, compiles the native worker, Linux launcher, and Rust supervisor, and assembles the complete Android rootfs **inside the image**. The APK or APKM is bind-mounted read-only from its isolated named build context (and its SHA-256 controls cache invalidation); the raw package is **not copied into an image layer**. The Docker builder still receives the archive, so use only a trusted, private builder. The verified Apple libraries extracted from it are present in the resulting runtime image.
 
-The generated image is `wrapper-v2:1.0.0-local-amd64` for x86-64 or `wrapper-v2:1.0.0-local-arm64` for ARM64. It is also tagged `wrapper-v2:local`, which Docker Compose uses automatically. Initial builds download the Android NDK and toolchains and therefore require substantial time, network access, and disk space; subsequent builds can reuse Docker layer caches.
+The generated image is `wrapper-v2:1.0.1-local-amd64` for x86-64 or `wrapper-v2:1.0.1-local-arm64` for ARM64. It is also tagged `wrapper-v2:local`, which Docker Compose uses automatically. Initial builds download the Android NDK and toolchains and therefore require substantial time, network access, and disk space; subsequent builds can reuse Docker layer caches.
 
 ### 3. Start Wrapper
 

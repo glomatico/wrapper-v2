@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.1 — 2026-11-26
+
+### Fixed
+
+- Fix an ARM64 Android 5.1.1 dynamic linker crash on Linux hosts with a
+  GNU-hash-only vDSO, including Debian 13. Failed vDSO registration no longer
+  leaves an invalid object in the global symbol lookup list.
+- Retain the existing Android API 22 runtime and Bionic libraries. The x86-64
+  runtime and HTTP/IPC protocol are unchanged.
+- Include the pinned AOSP source revision, reproducible build recipe, updated
+  runtime checksum and standalone linker regression tests.
+
 ## 1.0.0 — 2026-11-19
 
 Wrapper v2 1.0.0 is a ground-up rewrite of the original Wrapper v2, built for
