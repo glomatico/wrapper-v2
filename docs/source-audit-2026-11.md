@@ -12,10 +12,11 @@
   contents API, comparison against the upstream Wrapper Lite device-identity
   implementation, and review of the supplied reproduction in
   [glomatico/wrapper-v2 issue 23](https://github.com/glomatico/wrapper-v2/issues/23).
-- This is a **source-level audit**, not a claim of a completed live Apple login
-  test. The proprietary APKM, Apple account credentials, and a privileged Linux
-  Docker runtime were not run in this review environment. CI's synthetic worker
-  cannot validate Apple's proprietary `AuthenticateFlow`.
+- This document records the **source-level review**; that review did not itself
+  execute Apple's proprietary code. A separate clean x86_64 Docker deployment,
+  login, 2FA, session recovery, playback, and key-route reproduction was later
+  supplied and is documented near the end. CI's synthetic worker still cannot
+  validate Apple's proprietary `AuthenticateFlow`.
 
 ## Executive findings
 
@@ -55,7 +56,7 @@
 ### F-01 — Fresh-install device identity did not match the working client profile
 
 **Severity:** High for first-login availability  
-**Status:** Fixed in this change; real Apple login still requires private verification.
+**Status:** Fixed and exercised in the supplied clean x86_64 reproduction. ARM64 and broader native/media behavior remain unverified.
 
 Baseline implementation in `src/device_info.rs` used:
 
@@ -252,51 +253,40 @@ volume contains persistent authentication state. Keep all of them private.
 
 | Area | Source/test coverage reviewed | Live validation still required |
 | --- | --- | --- |
-| Device identity | persistence, atomic creation, concurrent startup, explicit override and legacy identity tests | new-login and existing-session test with build 1109 |
-| HTTP API | synthetic end-to-end routes, validation, error mapping, redaction | no Apple native path |
-| Supervisor | mock worker recycle/recovery, cancellation, 2FA, client disconnect | actual native worker restart and session restoration |
-| Native protocol | framing, size/depth checks, 2FA continuation validation, SHA-256/base64 tests | Apple IPC behavior |
-| Launcher | disposable PID/mount namespaces, orphan reaping, teardown | target host's Docker seccomp/AppArmor policy |
-| APKM staging | synthetic APK/APKM, manifest/hash/ELF and duplicate-library rejection | actual authorized APKM extraction and full Docker build |
-| x86-64/ARM64 capture | static profiles, offsets, hashes and context length contracts | real playback/context request for each ABI |
+| Device identity | persistence, atomic creation, concurrent startup, explicit override and legacy identity tests | clean x86_64 fresh login/2FA succeeded; ARM64 live test remains outstanding |
+| HTTP API | synthetic routes, validation, error mapping, and redaction | x86_64 login, challenge, session, credential, playback, and key routes returned expected HTTP responses |
+| Supervisor | mock worker recycle/recovery, cancellation, 2FA, and client disconnect | x86_64 worker replacement and session recovery exercised; failure-mode matrix not exhausted |
+| Native protocol | framing, size/depth checks, 2FA continuation validation, SHA-256/base64 tests | x86_64 Apple authentication and worker IPC exercised; every native edge case remains unverified |
+| Launcher | disposable PID/mount namespaces, orphan reaping, and teardown | clean x86_64 Docker deployment exercised; other kernels and security profiles remain environment-dependent |
+| APK/APKM staging | synthetic package fixtures, manifest/hash/ELF and duplicate-library rejection | the supplied x86_64 deployment completed a private image build; ARM64 build remains unverified |
+| x86-64/ARM64 capture | static profiles, offsets, hashes and context length contracts | x86_64 playback and /key returned HTTP 200; context bytes were not independently validated, and ARM64 was not tested |
 
-## Exact Apple Music package required for private verification
+## Private build-input and verification boundary
 
-The exact APKMirror listing identified for the build pinned by this repository is:
+The selected profiles target Apple Music package `com.apple.android.music`,
+version `3.6.0-beta`, build `1109`, with architecture-specific manifest and
+native-library hashes. The operator supplies an authorized local standalone
+APK or supported split APKM; the repository does not distribute that package
+or identify a third-party download source.
 
-- Package: `com.apple.android.music`
-- Version: `3.6.0-beta`
-- Build: `1109`
-- Variant: `arm64-v8a + x86_64`, split APKM bundle
-- Listing: <https://www.apkmirror.com/apk/apple/apple-music/apple-music-3-6-0-beta-release/apple-music-3-6-0-beta-4-android-apk-download/>
-- APKM SHA-256:
-  `5be907af370a7f6bd73344e646dcfebe2e64c2da3b9ad71192110c91950f3f67`
+`tools/prepare_rootfs.py` verifies the required base/split manifest digest,
+selects the expected architecture split, checks the ELF machine type, and
+compares every extracted Apple native library against the selected profile's
+SHA-256 value. It stages only the allowlisted native libraries and the
+separately pinned Android system files.
 
-Verify a downloaded file before building:
+The build helper also computes the SHA-256 of the complete local APK/APKM and
+passes it to BuildKit. The Dockerfile recomputes that same value inside the
+builder. This verifies that the supplied build input remains unchanged across
+the BuildKit hand-off and participates in cache invalidation. It is **not** a
+publisher-authenticity check and is not a comparison against a trusted,
+hard-coded whole-archive checksum. The unused `bundle_sha256` profile field
+was removed so the metadata no longer implies an archive-level validation
+that the staging code does not perform.
 
-```bash
-sha256sum AppleMusic-3.6.0-beta-1109.apkm
-./tools/build-docker.sh /path/to/AppleMusic-3.6.0-beta-1109.apkm --arch x86_64
-./tools/build-docker.sh /path/to/AppleMusic-3.6.0-beta-1109.apkm --arch arm64-v8a
-```
-
-Use only an authorized copy. Do not commit the APKM, extracted proprietary
-libraries, credentials, tokens, or session data to this repository. Do not
-publish the resulting image.
-
-## Change log for this audit branch
-
-- Changed the generated default fingerprint to the tested client tuple and
-  64-bit Android-ID representation.
-- Kept 128-bit entropy for temporary staging-file names.
-- Added regression coverage for the new fresh-install identity and for the
-  no-migration guarantee on already persisted identities.
-- Updated the `.env.example` manual override.
-- Documented the identity compatibility behavior and corrected the ARM64 API
-  level in the README.
-- Added the findings, limits, architecture map, and private validation matrix
-  in this document.
-
+Do not commit the input package, extracted proprietary libraries, account
+credentials, tokens, or session data. The resulting local image contains
+extracted Apple libraries and must remain private.
 
 ## Successful clean-install reproduction — 25 November 2026 local time
 

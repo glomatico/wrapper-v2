@@ -1,29 +1,29 @@
-# Clean Linux installation — Wrapper v2 1.0.0
+# Clean Linux installation
 
-This guide covers a clean installation of the corrected Wrapper branch. It is
-distribution-independent: install the prerequisites using the package manager
-and Docker setup supported by your Linux distribution.
+This runbook describes the validated x86_64 installation path for Wrapper v2 1.0.0. It keeps the complete setup procedure in one place; the repository README contains only the quick start and project overview.
 
-## Validated environment
+## 1. Validation boundary
 
-The successful test ran Wrapper and Docker Compose inside openSUSE Tumbleweed
-under an updated WSL installation on Windows 10 IoT Enterprise LTSC 2021.
-Gamdl was installed separately on Windows. The tested Wrapper architecture was
-x86_64 only.
+The live reproduction used Windows 10 IoT Enterprise LTSC 2021, openSUSE Tumbleweed under WSL, Docker Compose inside Linux, Wrapper 1.0.0, an x86_64 native worker, and Apple Music 3.6.0-beta build 1109. Gamdl was installed separately on Windows.
 
-The test completed login, 2FA, credentials retrieval, session recovery after
-worker recycling, playback, and `/key` requests. ARM64 is expected to use the
-same shared Rust device-identity code, but was not included in this live test.
+Fresh login, 2FA, session-credential retrieval, worker replacement/session recovery, playback, and `/key` HTTP requests succeeded on x86_64. The test did not validate ARM64. Its build and runtime profiles exist, but treat ARM64 live authentication, playback, and context capture as unverified.
 
-## 1. Host prerequisites
+See [the source audit](source-audit-2026-11.md) for the sanitized event sequence, exact test scope, and unresolved findings.
 
-Install Linux on x86_64 or aarch64, Docker Engine with a running daemon, Docker
-Compose v2.24 or newer, Docker Buildx/BuildKit, Git, Bash, coreutils, and curl.
+## 2. Linux host prerequisites
 
-No host Rust toolchain, Android SDK/NDK, CMake, Ninja, or cross-compiler is
-required. The Docker build installs compilation toolchains in its builder.
+Use Linux on x86_64 for the validated path. The codebase also contains an ARM64 build profile, but that target has not been end-to-end validated by this reproduction.
 
-Verify:
+Install and configure:
+
+- Docker Engine with a running daemon.
+- Docker Compose plugin 2.24 or newer.
+- Docker Buildx with BuildKit enabled.
+- Git, Bash, coreutils (including `realpath`, `sha256sum`, and `mktemp`), and `curl`.
+
+Rust, Android NDK, CMake, Ninja, and cross-compilers are installed inside the Docker builder; they are not required on the host.
+
+Verify the environment:
 
 ```bash
 uname -m
@@ -34,20 +34,18 @@ docker buildx version
 docker buildx inspect --bootstrap
 ```
 
-The Docker CLI must be able to reach the daemon (the `docker version` output
-must include a server section).
+The Docker CLI must show both client and server sections. Buildx must report a usable builder. Docker daemon access is effectively privileged host access; grant it only to trusted users.
 
-## 2. Clone the corrected branch
+## 3. Clone a source revision containing the correction
 
-After the correction is merged upstream, clone the canonical repository:
+After the upstream pull request is merged, use the canonical repository:
 
 ```bash
 git clone https://github.com/glomatico/wrapper-v2.git
 cd wrapper-v2
 ```
 
-**While the upstream pull request is still awaiting review**, the tested fix is
-available on this fork branch:
+While the upstream pull request is pending, the tested correction is on this fork branch:
 
 ```bash
 git clone --branch fix/device-info-apple-auth-1109 --single-branch \
@@ -55,61 +53,56 @@ git clone --branch fix/device-info-apple-auth-1109 --single-branch \
 cd wrapper-v2
 ```
 
-Check the current branch and commit before building:
+Confirm that the working tree is clean and the selected revision contains the correction:
 
 ```bash
 git status --short --branch
 git log -1 --oneline
 ```
 
-## 3. Download the pinned Apple Music APKM
+Do not assume that upstream `main` contains the correction until the maintainer merges it.
 
-Download the APKM variant containing x86_64 and arm64-v8a splits from the
-[exact APKMirror 3.6.0-beta listing](https://www.apkmirror.com/apk/apple/apple-music/apple-music-3-6-0-beta-release/apple-music-3-6-0-beta-4-android-apk-download/).
+## 4. Supply the local Apple Music build input
 
-Required package: `com.apple.android.music`, version `3.6.0-beta`, build
-`1109`, variant `arm64-v8a + x86_64`.
+The runtime profiles target Apple Music package `com.apple.android.music`, version `3.6.0-beta`, build `1109`. Supply your own authorized local package for the selected ABI. The build script accepts either:
 
-Pinned SHA-256:
+- A standalone APK containing the required manifest and architecture-specific native libraries.
+- A split APKM bundle containing `base.apk` and the matching architecture split.
 
-```text
-5be907af370a7f6bd73344e646dcfebe2e64c2da3b9ad71192110c91950f3f67
-```
+A base APK extracted by itself from a split package may not contain the required native libraries. The package must match the profile selected by `--arch`. This repository does not host the package and this runbook does not identify third-party download sources.
 
-Verify the download:
+Set a shell variable to the local file you already possess:
 
 ```bash
-sha256sum "$HOME/Downloads/AppleMusic-3.6.0-beta-1109.apkm"
+APPLE_MUSIC_PACKAGE="/absolute/path/to/your/authorized-Apple-Music-build-1109.apk"
+test -f "$APPLE_MUSIC_PACKAGE"
 ```
 
-The checksum must match exactly. Do not bypass validation or use another build.
-Do not commit the APKM. The local image contains extracted proprietary Apple
-libraries and must not be published or redistributed.
+The path may point to an `.apkm` file instead. Do not place the package in Git, a shared build context, or an image layer.
 
-## 4. Build the Docker image
+**What the build verifies:** `tools/prepare_rootfs.py` checks the expected base/split Android manifest digest, the selected ABI, the ELF machine type, and the SHA-256 hash of each required Apple native library. It stages only the allowlisted files. The helper also calculates the complete input archive's SHA-256 and passes that value through BuildKit; this preserves input consistency and cache invalidation, but it is not a publisher-authenticity check or a comparison to a trusted, hard-coded whole-archive checksum.
 
-For the tested architecture:
+## 5. Build the tested x86_64 image
 
 ```bash
-./tools/build-docker.sh "$HOME/Downloads/AppleMusic-3.6.0-beta-1109.apkm" --arch x86_64
+./tools/build-docker.sh "$APPLE_MUSIC_PACKAGE" --arch x86_64
 ```
 
-The build helper sends the package through an isolated BuildKit context. The
-Dockerfile checks its digest, pinned manifests, Apple library hashes, bundled
-Android system files, and executable architectures, then compiles the native
-worker/launcher and Rust server and stages the Android rootfs.
+The multi-stage Docker build installs the pinned NDK and Rust toolchain, compiles the native worker and namespace launcher, builds the Rust HTTP service, validates the selected runtime files, and assembles the Android root filesystem inside the image.
 
-ARM64 build command (not live-tested in the reported reproduction):
+The build must complete without manifest, hash, architecture, missing-library, or compilation errors. Do not start an image produced by an interrupted or failed build.
+
+An ARM64 build can be requested with:
 
 ```bash
-./tools/build-docker.sh "$HOME/Downloads/AppleMusic-3.6.0-beta-1109.apkm" --arch arm64-v8a
+./tools/build-docker.sh "$APPLE_MUSIC_PACKAGE" --arch arm64-v8a
 ```
 
-Cross-building ARM64 may require binfmt/QEMU or a remote multi-platform builder.
+This command is present in the build scripts, but it is not validated by the live reproduction documented here. Cross-building may require binfmt/QEMU support in Buildx or a remote multi-platform builder. Do not treat a successful image build alone as proof of ARM64 authentication or playback.
 
-## 5. Start and verify Wrapper
+## 6. Start Wrapper and check the service
 
-No `.env` file is required for a normal fresh installation:
+A normal clean installation does not need a `.env` file:
 
 ```bash
 docker compose up -d
@@ -117,7 +110,9 @@ docker compose ps
 docker compose logs -f wrapper
 ```
 
-Check service health and runtime profile:
+The service binds to `127.0.0.1:8080` on the Linux host and stores session data in the persistent `wrapper_data` volume by default.
+
+Check liveness, runtime profile, and session state:
 
 ```bash
 curl -fsS http://127.0.0.1:8080/health
@@ -125,72 +120,71 @@ curl -fsS http://127.0.0.1:8080/info
 curl -fsS http://127.0.0.1:8080/session
 ```
 
-A fresh data volume has no saved Apple Music session. A restore attempt may
-return `no_cached_session` or `session_expired`; proceed with a new login.
+- `/health` confirms that the HTTP server is responding. It does not prove the native worker is authenticated.
+- `/info` reports the version, architecture, and selected runtime profile.
+- `/session` reports the session/worker state.
 
-## 6. Connect Windows Gamdl to Wrapper under WSL
+A new volume has no cached Apple Music session. An initial restore attempt may report `no_cached_session` or `session_expired`; continue through a fresh login.
 
-In the validated arrangement Gamdl ran on Windows while Wrapper ran under WSL.
-With WSL localhost forwarding enabled and the default Compose port mapping,
-use this endpoint from Windows:
+## 7. Connect Windows Gamdl to Wrapper under WSL
+
+The validated arrangement ran Wrapper inside WSL and installed Gamdl separately on Windows. With WSL localhost forwarding enabled and the default Compose port mapping, Windows can reach the service at:
 
 ```text
 http://127.0.0.1:8080
 ```
 
-Test reachability in PowerShell:
+Check from PowerShell:
 
 ```powershell
 curl.exe -fsS http://127.0.0.1:8080/health
 ```
 
-Configure Gamdl to use Wrapper as its authentication provider and enter the
-endpoint when requested. Keep WSL, Docker, and the Wrapper container running.
+Configure Gamdl to use Wrapper as its authentication provider and supply the endpoint when prompted. Complete Apple Account login and any 2FA challenge in the client. Keep the WSL distribution, Docker daemon, and Wrapper container running while Gamdl uses the service.
 
-If Windows cannot reach the service, check WSL localhost forwarding and the
-Compose port mapping. Do not expose the service on all host interfaces as a
-workaround; the HTTP API has no built-in authentication or TLS.
+If Windows cannot reach the endpoint, check WSL localhost forwarding and the Compose port mapping first. Do not expose the unauthenticated HTTP service on all host interfaces as a workaround.
 
-## 7. Expected successful flow
+## 8. Expected authentication and runtime sequence
 
-The validated x86_64 run showed:
+The validated x86_64 run exercised this sequence:
 
-1. `server.started` and `worker.started`.
-2. `POST /session/login` returning HTTP 202 for the pending 2FA challenge.
-3. Challenge completion with HTTP 200 and `session.authenticated`.
-4. `GET /session` and `GET /session/credentials` returning HTTP 200.
-5. `session.recovered` after worker replacement.
-6. Playback and `/key` requests returning HTTP 200.
+1. The API and native worker start.
+2. A fresh `POST /session/login` returns HTTP 202 while the 2FA challenge is pending.
+3. Challenge submission returns HTTP 200 and Wrapper logs `session.authenticated`.
+4. `GET /session` and `GET /session/credentials` return HTTP 200.
+5. After worker replacement, Wrapper logs `session.recovered`.
+6. Playback and `/key` requests return HTTP 200.
 
-These results verify the exercised x86_64 paths, not ARM64.
+These results confirm the exercised x86_64 routes. They do not validate every catalog item, codec, playback edge case, internal context-byte correctness, or ARM64.
 
-## 8. Preserve or intentionally delete session state
+## 9. Preserve session state
 
-Stop without deleting persisted session state:
+Stop the service without deleting the persistent volume:
 
 ```bash
 docker compose down
 ```
 
-Rebuild and restart while retaining the same Compose volume:
+Rebuild and restart while keeping the same Compose project and volume:
 
 ```bash
-./tools/build-docker.sh "$HOME/Downloads/AppleMusic-3.6.0-beta-1109.apkm" --arch x86_64
+./tools/build-docker.sh "$APPLE_MUSIC_PACKAGE" --arch x86_64
 docker compose up -d
 ```
 
-Only when intentionally deleting the generated device identity and cached
-Apple Music session:
+**Destructive reset — use only when intentionally deleting the saved device identity and Apple Music session:**
 
 ```bash
 docker compose down -v
 ```
 
-Never use `down -v` as a routine update command. Preserve the volume so the
-device identity remains paired with the cached session.
+The `-v` option removes the Compose-managed named volume. Never use it as a routine update command. For installations using the legacy `WRAPPER_DATA_DIR=./data` bind mount, preserve that directory and its original `WRAPPER_DEVICE_INFO`; do not silently switch to the named volume.
 
-## 9. Security
+## 10. Security
 
-Keep the default loopback binding, restrict Docker daemon access, and keep the
-data volume and logs private. Do not expose Wrapper directly to the Internet,
-publish the local image, or commit the APKM, credentials, or session data.
+- Keep the host binding on loopback. The HTTP API has no built-in authentication or TLS.
+- Do not expose port 8080 directly to the Internet; use a separately authenticated TLS gateway for deliberate remote access.
+- Treat Docker daemon access, the session volume, `.env`, and operational logs as sensitive.
+- Do not commit the Apple Music package, extracted proprietary libraries, credentials, or session state.
+- Do not publish or redistribute the locally built image: it contains extracted proprietary Apple libraries.
+- Keep the generated device identity paired with its session volume across restarts and image upgrades.

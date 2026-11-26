@@ -13,9 +13,9 @@ use crate::error::ApiError;
 
 const FILE_NAME: &str = ".wrapper-device-info";
 const LEGACY_FILE_NAME: &str = ".worker-device";
-// Match the known-working Apple Music client fingerprint used by the
-// upstream Wrapper implementation. Android IDs in this field are 64-bit
-// values rendered as 16 lowercase hexadecimal characters.
+// Use the combined client fingerprint reported to complete fresh login
+// and 2FA in issue #23. That report changed the client tuple and Android-ID
+// length together, so the independent effect of each change is not isolated.
 const DEVICE_PREFIX: &str = "Music/5.0.2/Android/10/Pixel 8/7663314/en-US/en-US/";
 
 fn invalid() -> ApiError {

@@ -2,24 +2,18 @@
 
 ## Unreleased
 
-- Expand the README with a distribution-independent clean Linux installation
-  procedure, exact build-1109 APKM verification, Docker/Buildx prerequisites,
-  Windows Gamdl-to-WSL connectivity, session persistence, and troubleshooting.
-- Record the successful clean x86_64 reproduction on openSUSE Tumbleweed under
-  updated WSL on Windows 10 IoT Enterprise LTSC 2021. Windows Gamdl was installed
-  separately. ARM64 remains expected from the shared identity code but has not
-  been live-tested in this reproduction.
-- Fix the generated first-install device fingerprint to use the known-working
-  Apple Music client tuple `Music/5.0.2/Android/10/Pixel 8/7663314` and a
-  64-bit Android ID encoded as 16 lowercase hexadecimal characters. The
-  identity remains generated once and persisted; existing identity files and
-  legacy session hashes are not rewritten.
-- Add regression coverage for the generated fingerprint shape and for
-  preservation of an existing 1.0.0 identity.
-- Correct the documented Android runtime API level for ARM64 to API 21,
-  matching the pinned profile and CMake build configuration.
-- Add a source-level reverse-engineering and security audit with explicit
-  runtime-validation limitations.
+- Correct the generated first-install device fingerprint using the combined
+  client tuple and 64-bit Android-ID representation reported to complete
+  fresh login and 2FA. Existing persisted identities, native identity hashes,
+  and cached sessions are not rewritten.
+- Retain independent 128-bit randomness for temporary identity-file names
+  and add regression coverage for fresh identity generation, concurrent
+  initialization, explicit overrides, and legacy identity preservation.
+- Add one clean Linux installation runbook and a separate source audit with
+  the successful x86_64 reproduction and its limits. The reproduction does
+  not establish ARM64 end-to-end support.
+- Correct the documented Android application build target to API 21, matching
+  the pinned profile and CMake configuration.
 
 ## 1.0.0 — 2026-11-19
 
@@ -39,8 +33,8 @@ decryption locally using [Temari](https://github.com/WorldObservationLog/Temari)
   through `/playback`, `/session`, and `/session/credentials`.
 - Report supported features, architecture, profile and protocol through `/info`
   so clients can reject incompatible servers before attempting authentication.
-- Support native **x86-64** and **ARM64** workers, each with verified
-  architecture-specific runtime and Apple Music library profiles.
+- Provide architecture-specific x86-64 and ARM64 worker implementations and
+  runtime profiles. Live validation scope is documented separately.
 
 ### Authentication and lifecycle
 
@@ -58,15 +52,14 @@ decryption locally using [Temari](https://github.com/WorldObservationLog/Temari)
 ### Docker installation
 
 - Use a multi-stage Docker build for the Rust server, native worker, Linux
-  launcher, and full Android runtime. Host-installed Rust and Android NDK are
-  not required.
-- Bundle verified Google Android system image components for both supported
-  architectures, together with their third-party notices.
-- Accept an authorized, pinned Apple Music **3.6.0-beta (build 1109)** standalone
-  `.apk` or `.apkm` bundle directly as an argument to
-  `tools/build-docker.sh`. Verify the expected manifests and native libraries
-  before staging.
-- Pass the private package through an isolated Docker BuildKit build context
+  launcher, and Android runtime. Host-installed Rust and Android NDK are not
+  required.
+- Bundle Google Android system runtime components for both architectures,
+  together with their original third-party notices.
+- Accept an operator-supplied local Apple Music 3.6.0-beta (build 1109)
+  standalone APK or supported split APKM. Validate the expected manifests,
+  native libraries, and architecture before staging.
+- Pass the private package through an isolated Docker BuildKit named context
   rather than copying the raw package into an image layer.
 - Start Docker Compose without a `.env` file. Generate a persistent device
   identity on first startup and retain it with account/session data in a named
@@ -79,8 +72,8 @@ decryption locally using [Temari](https://github.com/WorldObservationLog/Temari)
 
 - **Breaking change:** Existing clients using the former `/decrypt` endpoint
   must migrate to the 1.0.0 session, playback, and Temari context APIs.
-- **No APK is distributed with the source code.** Users must supply their own
-  authorized copy of the pinned Apple Music version.
+- **No Apple Music APK is distributed with the source code.** The operator
+  supplies an authorized local package compatible with the pinned profile.
 - **Do not publish or redistribute locally built Docker images.** Those images
   include Apple's extracted proprietary libraries even though the Git repository
   does not.
@@ -88,7 +81,7 @@ decryption locally using [Temari](https://github.com/WorldObservationLog/Temari)
   persistent Docker volume and retain existing explicit identity settings when
   upgrading an older deployment.
 - This rewrite has received substantial AI coding assistance. See the
-  [README acknowledgements and AI disclosure](README.md#acknowledgements).
+  [README AI usage note](README.md#ai-usage).
 
 ## 0.0.2 and earlier
 

@@ -5,7 +5,6 @@
   "architecture": "arm64-v8a",
   "base_manifest_sha256": "9aef5c901453199ddfbca184eabd5237b0a287dc1af4fbdad56368bfd3c9c5f3",
   "split_manifest_sha256": "d13b9dc7e896ce4c1427f56b2f8216f5c9e2223ea1fcf66d09c046348bb57f2e",
-  "bundle_sha256": "5be907af370a7f6bd73344e646dcfebe2e64c2da3b9ad71192110c91950f3f67",
   "apple_libraries": {
     "libBlocksRuntime.so": "f7ebfdcf5115c6bf2073c79c498bcf6652f2501a697774a053cab4f6cf3e638a",
     "libCoreADI.so": "db8779a9e1b026a087cd9a35c7d69f8af51418a29249ef325e6391ec560f6f47",

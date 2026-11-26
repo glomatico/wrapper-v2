@@ -41,7 +41,8 @@ apk=$(realpath -- "$apk_input")
 apk_sha256=$(sha256sum "$apk" | cut -d ' ' -f 1)
 image=${WRAPPER_IMAGE:-wrapper-v2:1.0.0-local-${platform#linux/}}
 
-echo "Building $image ($platform) with the verified APK supplied privately to BuildKit."
+echo "Building $image ($platform) with the local Apple Music package supplied privately to BuildKit."
+echo "The builder checks the selected profile manifests and native-library hashes."
 echo "NOTE: The resulting image contains Apple's proprietary libraries; do not publish it."
 
 # BuildKit limits the size of --secret inputs on some builders. Use an isolated
